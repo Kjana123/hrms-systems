@@ -24,6 +24,17 @@ function App() {
   const [allLeaves, setAllLeaves] = useState([]);
   const [allCorrections, setAllCorrections] = useState([]);
   const [today, setToday] = useState(moment().format('YYYY-MM-DD'));
+  const [user, setUser] = useState(null);
+
+useEffect(() => {
+  const storedUser = localStorage.getItem('user');
+  if (storedUser) {
+    const parsed = JSON.parse(storedUser);
+    setUser(parsed);
+    setRole(parsed.role);
+  }
+}, []);
+
 
   // Update today dynamically
   useEffect(() => {
@@ -295,10 +306,14 @@ const fetchAttendance = async () => {
   return (
     <div className={`app-container ${darkMode ? 'dark' : ''}`}>
       <div className="header">
-        <h1 className="text-2xl font-bold">
-          HRMS Dashboard <span className="text-indigo-600 dark:text-indigo-400">({role})</span>
-        </h1>
-        <div className="flex space-x-2">
+      <h1 className="text-3xl font-bold text-gray-800 dark:text-white">
+  👋 Welcome to HRMS, {user?.name || 'User'}!
+</h1>
+<p className="text-lg text-gray-600 dark:text-gray-300 mt-1">
+  You are logged in as <span className="font-semibold">{role}</span>.
+</p>
+                <div className="flex space-x-2">
+     
           <button
             onClick={() => setShowChangePasswordModal(true)}
             className="btn btn-primary"
