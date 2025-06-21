@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS corrections (
   user_id INTEGER REFERENCES users(id),
   date DATE,
   reason TEXT,
-  status TEXT
+  status TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS leaves (
