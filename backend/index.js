@@ -40,7 +40,6 @@ pool.connect((err, client, release) => {
   release();
 });
 
-const nodemailer = require('nodemailer');
 
 const transporter = nodemailer.createTransport({
   host: 'smtp.secureserver.net',
