@@ -125,6 +125,20 @@ app.post('/auth/register', async (req, res) => {
 app.post('/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
+    console.log("🛂 Login request body:", req.body);
+
+const allUsers = await pool.query('SELECT * FROM users');
+console.log("🧾 All users in DB:", allUsers.rows);
+
+if (allUsers.rows.length) {
+  const testUser = allUsers.rows.find(u => u.email === email);
+  if (testUser) {
+    const bcrypt = require('bcrypt');
+    const match = await bcrypt.compare(password, testUser.password);
+    console.log("🔑 Password match:", match);
+  }
+}
+
 
     console.log("Login request:", { email, password }); // ✅ ← THIS GOES HERE
 
