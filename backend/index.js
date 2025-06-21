@@ -154,7 +154,16 @@ app.post('/auth/login', async (req, res) => {
     console.error('User login error:', error);
     res.status(500).json({ message: 'Server error during login.' });
   }
+  console.log("User found:", user);
+if (user) {
+  console.log("Stored password hash:", user.password);
+  const passwordMatch = await bcrypt.compare(password, user.password);
+  console.log("Password match result:", passwordMatch);
+}
 });
+
+console.log("Login request:", { email, password });
+
 
 app.post('/auth/forgot-password', async (req, res) => {
   try {
