@@ -103,9 +103,9 @@ app.post('/auth/register', async (req, res) => {
     if (!name || !email || !password || !role) {
       return res.status(400).json({ message: 'All fields (name, email, password, role) are required.' });
     }
-    if (!['user', 'admin'].includes(role)) {
-      return res.status(400).json({ message: 'Role must be "user" or "admin".' });
-    }
+   if (role !== 'employee' && role !== 'admin') {
+  return res.status(400).json({ message: 'Role must be "employee" or "admin".' });
+}
 
     const hashed = await bcrypt.hash(password, 10);
     await pool.query(
