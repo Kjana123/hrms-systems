@@ -193,8 +193,6 @@ if (allUsers.rows.length) {
   }
 });
 
-
-
 app.post('/auth/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
@@ -213,16 +211,17 @@ app.post('/auth/forgot-password', async (req, res) => {
 
     const resetToken = uuidv4();
     const expiresAt = new Date(Date.now() + 3600 * 1000);
+    console.log('Generated reset token:', resetToken, 'expires at:', expiresAt);
 
     await pool.query(
       'INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE SET token = $2, expires_at = $3',
       [user.id, resetToken, expiresAt]
     );
-    console.log('Reset token saved for user_id:', user.id, 'token:', resetToken);
+    console.log('Reset token saved for user_id:', user.id);
 
-    const frontendUrl = process.env.FRONTEND_URL || 'https://hrms-systems.onrender.com';
+    const frontendUrl = process.env.FRONTEND_URL || 'https://attendance.unitedsolutionsplus.in';
     const resetLink = `${frontendUrl}/?view=resetPassword&token=${resetToken}`;
-    console.log('Reset link generated:', resetLink);
+    console.log('Reset link:', resetLink);
 
     const mailOptions = {
       from: process.env.EMAIL_USER,
@@ -243,7 +242,7 @@ app.post('/auth/forgot-password', async (req, res) => {
     console.log('Password reset email sent to:', email);
     res.status(200).json({ message: 'If a matching account is found, a password reset link has been sent to your email.' });
   } catch (error) {
-    console.error('Forgot password error:', error);
+    console.error('Forgot password error:', error.message, error.stack);
     res.status(500).json({ message: 'Server error during password reset request.', error: error.message });
   }
 });
@@ -251,6 +250,7 @@ app.post('/auth/forgot-password', async (req, res) => {
 app.post('/auth/reset-password', async (req, res) => {
   try {
     const { token, newPassword } = req.body;
+    console.log('Reset password request with token:', token);
     if (!token || !newPassword) {
       return res.status(400).json({ message: 'Token and new password are required.' });
     }
@@ -262,6 +262,7 @@ app.post('/auth/reset-password', async (req, res) => {
     const resetRecord = rows[0];
 
     if (!resetRecord || new Date() > new Date(resetRecord.expires_at)) {
+      console.log('Invalid or expired token:', token);
       return res.status(400).json({ message: 'Invalid or expired reset token.' });
     }
 
@@ -270,13 +271,42 @@ app.post('/auth/reset-password', async (req, res) => {
       'UPDATE users SET password=$1 WHERE id=$2',
       [hashed, resetRecord.user_id]
     );
+    console.log('Password updated for user_id:', resetRecord.user_id);
 
     await pool.query('DELETE FROM password_reset_tokens WHERE token=$1', [token]);
+    console.log('Reset token deleted:', token);
 
     res.status(200).json({ message: 'Password has been reset successfully.' });
   } catch (error) {
-    console.error('Reset password error:', error);
-    res.status(500).json({ message: 'Server error during password reset.' });
+    console.error('Reset password error:', error.message, error.stack);
+    res.status(500).json({ message: 'Server error during password reset.', error: error.message });
+  }
+});
+
+app.get('/auth/validate-reset-token', async (req, res) => {
+  try {
+    const { token } = req.query;
+    console.log('Validating reset token:', token);
+    if (!token) {
+      return res.status(400).json({ message: 'Token is required.' });
+    }
+
+    const { rows } = await pool.query(
+      'SELECT user_id, expires_at FROM password_reset_tokens WHERE token=$1',
+      [token]
+    );
+    const resetRecord = rows[0];
+
+    if (!resetRecord || new Date() > new Date(resetRecord.expires_at)) {
+      console.log('Invalid or expired token:', token);
+      return res.status(400).json({ message: 'Invalid or expired reset token.' });
+    }
+
+    console.log('Token is valid for user_id:', resetRecord.user_id);
+    res.status(200).json({ message: 'Token is valid.' });
+  } catch (error) {
+    console.error('Token validation error:', error.message, error.stack);
+    res.status(500).json({ message: 'Server error during token validation.', error: error.message });
   }
 });
 
