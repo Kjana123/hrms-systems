@@ -63,7 +63,8 @@ function App() {
   useEffect(() => {
     const mapped = [
       ...attendance.map(a => ({
-        title: `Check-in: ${a.status.toUpperCase()} (${a.check_in ? moment(a.check_in).format('h:mm A') : 'N/A'} - ${a.check_out ? moment(a.check_out).format('h:mm A') : 'N/A'})`,
+        title: `Check-in: ${a.status ? a.status.toUpperCase() : 'UNKNOWN'} (${a.check_in ? moment(a.check_in).format('h:mm A') : 'N/A'} - ${a.check_out ? moment(a.check_out).format('h:mm A') : 'N/A'})`,
+
         start: new Date(a.date),
         end: new Date(a.date),
         allDay: true,
