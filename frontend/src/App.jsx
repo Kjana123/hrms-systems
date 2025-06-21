@@ -23,59 +23,108 @@ function App() {
   const [showCorrectionRequestModal, setShowCorrectionRequestModal] = useState(false);
   const [allLeaves, setAllLeaves] = useState([]);
   const [allCorrections, setAllCorrections] = useState([]);
-  const [today, setToday] = useState(moment().format('YYYY-MM-DD'));
+  const [today, setToday] = useState(moment().utc().format('YYYY-MM-DD')); // Use UTC
   const [user, setUser] = useState(null);
+  const [todayAttendance, setTodayAttendance] = useState(null);
+  const [isCheckingIn, setIsCheckingIn] = useState(false); // Prevent state overwrites
 
-useEffect(() => {
-  const storedUser = localStorage.getItem('user');
-  if (storedUser) {
-    const parsed = JSON.parse(storedUser);
-    setUser(parsed);
-    setRole(parsed.role);
-  }
-}, []);
+  // Define refreshUserData early
+  const refreshUserData = async () => {
+    if (isCheckingIn) {
+      console.log('Skipping refreshUserData during check-in');
+      return;
+    }
+    try {
+      let attempts = 5; // Increased for Neon
+      let allRecords;
+      const todayFormatted = moment().utc().format('YYYY-MM-DD');
+      console.log('Refreshing data for date:', todayFormatted);
+      while (attempts > 0) {
+        const res = await axios.get(`${process.env.REACT_APP_API_BASE_URL}/attendance`);
+        allRecords = res.data;
+        console.log('Fetched attendance records:', allRecords);
+        // Normalize date for comparison
+        const todayRecord = allRecords.find(a => moment(a.date).utc().format('YYYY-MM-DD') === todayFormatted);
+        console.log('Today\'s attendance record:', todayRecord);
+        if (todayRecord || attempts === 1) {
+          setAttendance(allRecords);
+          setTodayAttendance(prev => prev && isCheckingIn ? prev : todayRecord || null);
+          break;
+        }
+        console.log('No today\'s record found, retrying...');
+        await delay(2000); // Increased delay for Neon
+        attempts--;
+      }
+    } catch (error) {
+      console.error('Failed to fetch attendance:', error);
+    }
+    await Promise.all([fetchLeaves(), fetchCorrections()]);
+  };
 
+  const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+  // Initialize user from localStorage
+  useEffect(() => {
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      const parsed = JSON.parse(storedUser);
+      setUser(parsed);
+      setRole(parsed.role);
+    }
+  }, []);
+
+  // Refresh data when token changes
+  useEffect(() => {
+    if (token) {
+      refreshUserData();
+    }
+  }, [token]);
+
+  // Log todayAttendance updates
+  useEffect(() => {
+    console.log('✅ Updated todayAttendance:', todayAttendance);
+  }, [todayAttendance]);
 
   // Update today dynamically
   useEffect(() => {
     const interval = setInterval(() => {
-      const newToday = moment().format('YYYY-MM-DD');
+      const newToday = moment().utc().format('YYYY-MM-DD');
       if (newToday !== today) {
+        console.log('Date changed, refreshing data:', newToday);
         setToday(newToday);
+        setTodayAttendance(null); // Reset on date change
         refreshUserData();
       }
     }, 60000);
     return () => clearInterval(interval);
   }, [today]);
 
-  const todayAttendance = useMemo(() => {
-    return attendance.find(a => moment(a.date).format('YYYY-MM-DD') === today);
-  }, [attendance, today]);
-
   // Decode token and fetch initial data
   useEffect(() => {
     if (token) {
       try {
         const decoded = jwtDecode(token);
+        console.log('JWT decoded:', decoded);
         axios.defaults.headers.common['Authorization'] = 'Bearer ' + token;
         setRole(decoded.role);
-        refreshUserData();
-        if (decoded.role === 'admin') {
-          fetchAllAdminData();
+        if (!user) {
+          refreshUserData(); // Only refresh if user not set
+          if (decoded.role === 'admin') {
+            fetchAllAdminData();
+          }
         }
       } catch (err) {
         console.error('Token decoding failed:', err);
         handleLogout();
       }
     }
-  }, [token]);
+  }, [token, user]);
 
   // Map attendance and leaves to calendar events
   useEffect(() => {
     const mapped = [
       ...attendance.map(a => ({
         title: `Check-in: ${a.status ? a.status.toUpperCase() : 'UNKNOWN'} (${a.check_in ? moment(a.check_in).format('h:mm A') : 'N/A'} - ${a.check_out ? moment(a.check_out).format('h:mm A') : 'N/A'})`,
-
         start: new Date(a.date),
         end: new Date(a.date),
         allDay: true,
@@ -99,24 +148,58 @@ useEffect(() => {
     setCalendarEvents(mapped);
   }, [attendance, leaves]);
 
-  const refreshUserData = async () => {
-    await Promise.all([fetchAttendance(), fetchLeaves(), fetchCorrections()]);
+  const handleCheckIn = async () => {
+    try {
+      setIsCheckingIn(true); // Block refreshUserData overwrites
+      const response = await axios.post(`${process.env.REACT_APP_API_BASE_URL}/attendance/checkin`);
+      console.log('Check-in response:', response.data);
+      alert('Checked in successfully!');
+      setTodayAttendance({
+        ...response.data.data,
+        date: moment(response.data.data.date).utc().format('YYYY-MM-DD') // Normalize date
+      });
+      await refreshUserData(); // Refresh other data
+    } catch (err) {
+      console.error('Check-in failed:', err);
+      alert('Check-in failed: ' + (err.response?.data?.message || err.message));
+    } finally {
+      setIsCheckingIn(false); // Re-enable refreshUserData
+    }
+  };
+
+  const handleCheckOut = async () => {
+    try {
+      setIsCheckingIn(true); // Block overwrites
+      const response = await axios.post(`${process.env.REACT_APP_API_BASE_URL}/attendance/checkout`);
+      console.log('Check-out response:', response.data);
+      alert('Checked out successfully!');
+      setTodayAttendance({
+        ...response.data.data,
+        date: moment(response.data.data.date).utc().format('YYYY-MM-DD') // Normalize date
+      });
+      await refreshUserData();
+    } catch (err) {
+      console.error('Check-out failed:', err);
+      alert('Check-out failed: ' + (err.response?.data?.message || err.message));
+    } finally {
+      setIsCheckingIn(false);
+    }
   };
 
   const refreshAdminData = async () => {
     await Promise.all([fetchAllAdminLeaves(), fetchAllAdminCorrections()]);
   };
 
-const fetchAttendance = async () => {
-  try {
-    const res = await axios.get(`${process.env.REACT_APP_API_BASE_URL}/attendance`);
-    console.log('Fetched attendance data:', res.data);
-    setAttendance(res.data);
-  } catch (err) {
-    console.error('Error fetching attendance:', err);
-    alert('Failed to fetch attendance data.');
-  }
-};
+  const fetchAttendance = async () => {
+    try {
+      const res = await axios.get(`${process.env.REACT_APP_API_BASE_URL}/attendance`);
+      console.log('Fetched attendance data:', res.data);
+      setAttendance(res.data);
+    } catch (err) {
+      console.error('Error fetching attendance:', err);
+      alert('Failed to fetch attendance data.');
+    }
+  };
 
   const fetchLeaves = async () => {
     try {
@@ -160,28 +243,6 @@ const fetchAttendance = async () => {
 
   const fetchAllAdminData = async () => {
     await Promise.all([fetchAllAdminLeaves(), fetchAllAdminCorrections()]);
-  };
-
-  const handleCheckIn = async () => {
-    try {
-      await axios.post(`${process.env.REACT_APP_API_BASE_URL}/attendance/checkin`);
-      alert('Checked in successfully!');
-      await refreshUserData();
-    } catch (err) {
-      console.error('Check-in failed:', err);
-      alert('Check-in failed: ' + (err.response?.data?.message || err.message));
-    }
-  };
-
-  const handleCheckOut = async () => {
-    try {
-      await axios.post(`${process.env.REACT_APP_API_BASE_URL}/attendance/checkout`);
-      alert('Checked out successfully!');
-      await refreshUserData();
-    } catch (err) {
-      console.error('Check-out failed:', err);
-      alert('Check-out failed: ' + (err.response?.data?.message || err.message));
-    }
   };
 
   const handleCorrectionRequest = async (date, reason) => {
@@ -242,22 +303,27 @@ const fetchAttendance = async () => {
     }
   };
 
-  const handleLogout = () => {
-    localStorage.clear();
-    setToken(null);
-    setRole(null);
-    setAttendance([]);
-    setLeaves([]);
-    setCorrections([]);
-    setCalendarEvents([]);
-    setAllLeaves([]);
-    setAllCorrections([]);
-    setTab('attendance');
+  const handleLogout = async () => {
+    try {
+      localStorage.clear();
+      setToken(null);
+      setRole(null);
+      setAttendance([]);
+      setLeaves([]);
+      setCorrections([]);
+      setCalendarEvents([]);
+      setAllLeaves([]);
+      setAllCorrections([]);
+      setTab('attendance');
+      setUser(null);
+      setTodayAttendance(null);
+    } catch (err) {
+      console.error('Logout failed:', err);
+    }
   };
 
   const toggleDarkMode = () => setDarkMode(!darkMode);
 
-  // Handle drag-and-drop events
   const handleEventDrop = async ({ event, start, end }) => {
     if (event.resource.type === 'attendance' || event.resource.type === 'holiday') {
       alert('Cannot modify attendance or holiday events.');
@@ -267,7 +333,7 @@ const fetchAttendance = async () => {
       const updatedEvent = {
         ...event,
         start,
-        end: moment(end).subtract(1, 'days').toDate(), // Adjust for all-day events
+        end: moment(end).subtract(1, 'days').toDate(),
       };
       await axios.put(`${process.env.REACT_APP_API_BASE_URL}/leaves/${event.id}`, {
         from_date: moment(start).format('YYYY-MM-DD'),
@@ -305,15 +371,28 @@ const fetchAttendance = async () => {
 
   return (
     <div className={`app-container ${darkMode ? 'dark' : ''}`}>
+      <style>
+        {`
+          .btn:disabled {
+            cursor: not-allowed;
+            opacity: 0.6;
+          }
+          .btn.btn-warning:disabled {
+            cursor: not-allowed;
+            opacity: 0.6;
+            background-color: #f4a261;
+            color: #fff;
+          }
+        `}
+      </style>
       <div className="header">
-      <h1 className="text-3xl font-bold text-gray-800 dark:text-white">
-  👋 Welcome to HRMS, {user?.name || 'User'}!
-</h1>
-<p className="text-lg text-gray-600 dark:text-gray-300 mt-1">
-  You are logged in as <span className="font-semibold">{role}</span>.
-</p>
-                <div className="flex space-x-2">
-     
+        <h1 className="text-3xl font-bold text-gray-800 dark:text-white">
+          👋 Welcome to HRMS, {user?.name || 'User'}!
+        </h1>
+        <p className="text-lg text-gray-600 dark:text-gray-300 mt-1">
+          You are logged in as <span className="font-semibold">{role}</span>.
+        </p>
+        <div className="flex space-x-2">
           <button
             onClick={() => setShowChangePasswordModal(true)}
             className="btn btn-primary"
@@ -365,6 +444,7 @@ const fetchAttendance = async () => {
         )}
       </div>
 
+      {console.log("🪪 todayAttendance:", todayAttendance)}
       {tab === 'attendance' && (
         <div className="card">
           <h2 className="text-xl mb-4">Attendance Actions</h2>
@@ -379,7 +459,18 @@ const fetchAttendance = async () => {
             <button
               onClick={handleCheckOut}
               className="btn btn-warning"
-              disabled={!todayAttendance || !todayAttendance.check_in || todayAttendance.check_out}
+              disabled={
+                !todayAttendance ||
+                todayAttendance.check_in === null ||
+                todayAttendance.check_out !== null
+              }
+              title={
+                !todayAttendance?.check_in
+                  ? "You must check in before checking out."
+                  : todayAttendance?.check_out
+                  ? "You have already checked out today."
+                  : ""
+              }
             >
               Check Out
             </button>
@@ -411,7 +502,7 @@ const fetchAttendance = async () => {
             {attendance.length > 0 ? (
               attendance.map((a, i) => (
                 <li key={i} className="py-1">
-                  <span className="font-medium">{a.date}</span>: {a.check_in ? moment(a.check_in).format('HH:mm') : 'N/A'} - {a.check_out ? moment(a.check_out).format('HH:mm') : 'N/A'}
+                  <span className="font-medium">{moment(a.date).format('YYYY-MM-DD')}</span>: {a.check_in ? moment(a.check_in).format('HH:mm') : 'N/A'} - {a.check_out ? moment(a.check_out).format('HH:mm') : 'N/A'}
                   <span className={`status-badge status-badge-${a.status}`}>
                     Status: {a.status}
                   </span>
@@ -481,8 +572,8 @@ const fetchAttendance = async () => {
             startAccessor="start"
             endAccessor="end"
             className="rbc-calendar"
-            defaultView="month" // Set horizontal grid
-            views={['month', 'week', 'day']} // Enable month/week/day views
+            defaultView="month"
+            views={['month', 'week', 'day']}
             eventPropGetter={(event) => {
               let className = '';
               if (event.resource) {
@@ -497,7 +588,7 @@ const fetchAttendance = async () => {
               return { className };
             }}
             onEventDrop={handleEventDrop}
-            style={{ height: 600 }} // Ensure sufficient height
+            style={{ height: 600 }}
           />
         </div>
       )}
@@ -530,6 +621,10 @@ const fetchAttendance = async () => {
     </div>
   );
 }
+
+// Assume AuthForms, LeaveApplicationForm, AdminPanel, ChangePasswordModal, CorrectionRequestModal are defined elsewhere
+// Add them here if provided
+
 
 function AuthForms({ authView, setToken, darkMode, toggleDarkMode }) {
   const handleViewChange = (newView) => {
@@ -1123,5 +1218,7 @@ function AdminPanel({ allLeaves, allCorrections, handleLeaveApproval, handleCorr
     </div>
   );
 }
+
+
 
 export default App;
