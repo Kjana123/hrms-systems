@@ -198,6 +198,7 @@ if (allUsers.rows.length) {
 app.post('/auth/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
+    console.log('Forgot password request for:', email);
     if (!email) {
       return res.status(400).json({ message: 'Email is required.' });
     }
@@ -206,6 +207,7 @@ app.post('/auth/forgot-password', async (req, res) => {
     const user = rows[0];
 
     if (!user) {
+      console.log('No user found with email:', email);
       return res.status(200).json({ message: 'If a matching account is found, a password reset link has been sent to your email.' });
     }
 
@@ -216,19 +218,21 @@ app.post('/auth/forgot-password', async (req, res) => {
       'INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE SET token = $2, expires_at = $3',
       [user.id, resetToken, expiresAt]
     );
+    console.log('Reset token saved for user_id:', user.id, 'token:', resetToken);
 
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    const resetLink = `${ frontendUrl }/?view=resetPassword&token=${ resetToken }`;
+    const frontendUrl = process.env.FRONTEND_URL || 'https://hrms-systems.onrender.com';
+    const resetLink = `${frontendUrl}/?view=resetPassword&token=${resetToken}`;
+    console.log('Reset link generated:', resetLink);
 
     const mailOptions = {
       from: process.env.EMAIL_USER,
       to: email,
       subject: 'Password Reset Request for HRMS',
       html: `
-        <p>Hello ${ user.name },</p>
+        <p>Hello ${user.name},</p>
         <p>You have requested a password reset for your HRMS account.</p>
         <p>Please click on the following link to reset your password:</p>
-        <p><a href="${ resetLink }">${ resetLink }</a></p>
+        <p><a href="${resetLink}">${resetLink}</a></p>
         <p>This link will expire in 1 hour.</p>
         <p>If you did not request this, please ignore this email.</p>
         <p>Best regards,<br>HRMS Team</p>
@@ -240,7 +244,7 @@ app.post('/auth/forgot-password', async (req, res) => {
     res.status(200).json({ message: 'If a matching account is found, a password reset link has been sent to your email.' });
   } catch (error) {
     console.error('Forgot password error:', error);
-    res.status(500).json({ message: 'Server error during password reset request.' });
+    res.status(500).json({ message: 'Server error during password reset request.', error: error.message });
   }
 });
 
@@ -523,6 +527,47 @@ app.post('/tasks/mark-forgotten-checkout-absent', async (req, res) => {
   } catch (error) {
     console.error('Error processing forgotten check-outs:', error);
     res.status(500).json({ message: 'Server error processing forgotten check-outs.' });
+  }
+});
+
+app.get('/test-email', async (req, res) => {
+  try {
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: 'test@example.com', // Replace with your test email
+      subject: 'Test Email from HRMS',
+      text: 'This is a test email from your HRMS application.'
+    };
+    await transporter.sendMail(mailOptions);
+    console.log('Test email sent to test@example.com');
+    res.status(200).json({ message: 'Test email sent.' });
+  } catch (error) {
+    console.error('Test email error:', error);
+    res.status(500).json({ message: 'Failed to send test email.', error: error.message });
+  }
+});
+
+app.get('/auth/reset-reset-token', async (req, res) => {
+  try {
+    const { token } = req.query;
+    if (!token) {
+      return res.status(400).json({ message: 'Token is required.' });
+    }
+
+    const { rows } = await pool.query(
+      'SELECT user_id, expires_at FROM password_reset_tokens WHERE token=$1',
+      [token]
+    );
+    const resetRecord = rows[0];
+
+    if (!resetRecord || new Date() > new Date(resetRecord.expires_at)) {
+      return res.status(400).json({ message: 'Invalid or expired reset token.' });
+    }
+
+    res.status(200).json({ message: 'Token is valid.' });
+  } catch (error) {
+    console.error('Token validation error:', error);
+    res.status(500).json({ message: 'Server error during token validation.' });
   }
 });
 
