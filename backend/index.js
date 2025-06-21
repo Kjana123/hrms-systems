@@ -23,27 +23,26 @@ console.log('Environment variables:', {
   FRONTEND_URL: process.env.FRONTEND_URL,
 });
 
-// ✅ Direct PostgreSQL pool setup using env vars
+
 const pool = new Pool({
-  user: process.env.DB_USER,
-  host: process.env.DB_HOST,
-  database: process.env.DB_NAME,
-  password: process.env.DB_PASS,
-  port: process.env.DB_PORT,
-  ssl: { rejectUnauthorized: false }  // Required by Render PostgreSQL
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false, // Required by Neon
+  },
 });
 
 // ✅ Test connection
 pool.connect((err, client, release) => {
   if (err) {
-    console.error('❌ Database connection error:', err.stack);
+    console.error("❌ Database connection error:", err.stack);
     return;
   }
-  console.log('✅ Database connected successfully');
+  console.log("✅ Database connected successfully");
   release();
 });
 
 module.exports = pool;
+
 
 const transporter = nodemailer.createTransport({
   host: 'smtp.secureserver.net',
