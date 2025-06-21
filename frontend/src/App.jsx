@@ -108,7 +108,7 @@ const fetchAttendance = async () => {
 
   const fetchLeaves = async () => {
     try {
-      const res = await axios.get('${process.env.REACT_APP_API_BASE_URL}/leaves');
+      const res = await axios.get(`${process.env.REACT_APP_API_BASE_URL}/leaves`);
       setLeaves(res.data);
     } catch (err) {
       console.error('Error fetching leaves:', err);
@@ -118,7 +118,7 @@ const fetchAttendance = async () => {
 
   const fetchCorrections = async () => {
     try {
-      const res = await axios.get('${process.env.REACT_APP_API_BASE_URL}/attendance/corrections');
+      const res = await axios.get(`${process.env.REACT_APP_API_BASE_URL}/attendance/corrections`);
       setCorrections(res.data);
     } catch (err) {
       console.error('Error fetching corrections:', err);
@@ -128,7 +128,7 @@ const fetchAttendance = async () => {
 
   const fetchAllAdminLeaves = async () => {
     try {
-      const res = await axios.get('${process.env.REACT_APP_API_BASE_URL}/admin/leaves');
+      const res = await axios.get(`${process.env.REACT_APP_API_BASE_URL}/admin/leaves`);
       setAllLeaves(res.data);
     } catch (err) {
       console.error('Error fetching all admin leaves:', err);
@@ -138,7 +138,7 @@ const fetchAttendance = async () => {
 
   const fetchAllAdminCorrections = async () => {
     try {
-      const res = await axios.get('${process.env.REACT_APP_API_BASE_URL}/attendance/corrections');
+      const res = await axios.get(`${process.env.REACT_APP_API_BASE_URL}/attendance/corrections`);
       setAllCorrections(res.data);
     } catch (err) {
       console.error('Error fetching all admin corrections:', err);
@@ -152,7 +152,7 @@ const fetchAttendance = async () => {
 
   const handleCheckIn = async () => {
     try {
-      await axios.post('${process.env.REACT_APP_API_BASE_URL}/attendance/checkin');
+      await axios.post(`${process.env.REACT_APP_API_BASE_URL}/attendance/checkin`);
       alert('Checked in successfully!');
       await refreshUserData();
     } catch (err) {
@@ -163,7 +163,7 @@ const fetchAttendance = async () => {
 
   const handleCheckOut = async () => {
     try {
-      await axios.post('${process.env.REACT_APP_API_BASE_URL}/attendance/checkout');
+      await axios.post(`${process.env.REACT_APP_API_BASE_URL}/attendance/checkout`);
       alert('Checked out successfully!');
       await refreshUserData();
     } catch (err) {
@@ -174,7 +174,7 @@ const fetchAttendance = async () => {
 
   const handleCorrectionRequest = async (date, reason) => {
     try {
-      await axios.post('${process.env.REACT_APP_API_BASE_URL}/attendance/correction-request', { date, reason });
+      await axios.post(`${process.env.REACT_APP_API_BASE_URL}/attendance/correction-request`, { date, reason });
       alert('Correction request submitted!');
       await refreshUserData();
       setShowCorrectionRequestModal(false);
@@ -186,7 +186,7 @@ const fetchAttendance = async () => {
 
   const handleCorrectionApproval = async (id, status) => {
     try {
-      await axios.post('${process.env.REACT_APP_API_BASE_URL}/attendance/correction-review', { id, status });
+      await axios.post(`${process.env.REACT_APP_API_BASE_URL}/attendance/correction-review`, { id, status });
       alert(`Correction ID ${id} ${status}!`);
       await refreshAdminData();
       await refreshUserData();
@@ -198,7 +198,7 @@ const fetchAttendance = async () => {
 
   const handleLeaveApproval = async (leave_id, status) => {
     try {
-      await axios.post('${process.env.REACT_APP_API_BASE_URL}/admin/leaves/update', { leave_id, status });
+      await axios.post(`${process.env.REACT_APP_API_BASE_URL}/admin/leaves/update`, { leave_id, status });
       alert(`Leave ID ${leave_id} ${status}!`);
       await refreshAdminData();
       await refreshUserData();
@@ -210,7 +210,7 @@ const fetchAttendance = async () => {
 
   const handleApplyLeave = async (from_date, to_date, reason) => {
     try {
-      await axios.post('${process.env.REACT_APP_API_BASE_URL}/leaves/apply', { from_date, to_date, reason });
+      await axios.post(`${process.env.REACT_APP_API_BASE_URL}/leaves/apply`, { from_date, to_date, reason });
       alert('Leave application submitted!');
       await refreshUserData();
     } catch (err) {
@@ -221,7 +221,7 @@ const fetchAttendance = async () => {
 
   const handleChangePassword = async (currentPassword, newPassword) => {
     try {
-      const res = await axios.post('${process.env.REACT_APP_API_BASE_URL}/auth/change-password', { currentPassword, newPassword });
+      const res = await axios.post(`${process.env.REACT_APP_API_BASE_URL}/auth/change-password`, { currentPassword, newPassword });
       alert(res.data.message);
       setShowChangePasswordModal(false);
     } catch (err) {
@@ -554,7 +554,7 @@ function LoginForm({ setToken, onForgotPassword, darkMode, toggleDarkMode }) {
   const handleLogin = async e => {
     e.preventDefault();
     try {
-      const res = await axios.post('${process.env.REACT_APP_API_BASE_URL}/auth/login', { email, password });
+      const res = await axios.post(`${process.env.REACT_APP_API_BASE_URL}/auth/login`, { email, password });
       setToken(res.data.token);
       localStorage.setItem('token', res.data.token);
     } catch (err) {
@@ -620,7 +620,7 @@ function ForgotPasswordForm({ onBackToLogin, darkMode }) {
     setMessage('');
     setError('');
     try {
-      const res = await axios.post('${process.env.REACT_APP_API_BASE_URL}/auth/forgot-password', { email });
+      const res = await axios.post(`${process.env.REACT_APP_API_BASE_URL}/auth/forgot-password`, { email });
       setMessage(res.data.message);
       setEmail('');
     } catch (err) {
@@ -693,7 +693,7 @@ function ResetPasswordForm({ onBackToLogin, darkMode }) {
     }
 
     try {
-      const res = await axios.post('${process.env.REACT_APP_API_BASE_URL}/auth/reset-password', { token, newPassword });
+      const res = await axios.post(`${process.env.REACT_APP_API_BASE_URL}/auth/reset-password`, { token, newPassword });
       setMessage(res.data.message);
       setNewPassword('');
       setConfirmPassword('');
