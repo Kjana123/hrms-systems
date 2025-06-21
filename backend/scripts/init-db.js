@@ -23,7 +23,7 @@ const insertTestUser = `
 INSERT INTO users (email, password, name)
 VALUES (
   'test@example.com',
-  '$2b$10$DcB2ZnySh6zZDF5PVme05uvxSeNNqIqH5wZ4E0TnWB1osTP7sFlWe', -- password = 123456
+  '$2b$10$eAScQSdf/WEwxscRjtowFehMo9ltFmP4xTdraFtFQnveaP4UWJSCa', -- password = 123456
   'Test User'
 )
 ON CONFLICT (email) 
