@@ -12,17 +12,21 @@ const pool = new Pool({
 (async () => {
   try {
     await pool.query(`
-      ALTER TABLE attendance 
-      ADD CONSTRAINT unique_user_date UNIQUE(user_id, date)
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint WHERE conname = 'unique_user_date'
+        ) THEN
+          ALTER TABLE attendance
+          ADD CONSTRAINT unique_user_date UNIQUE(user_id, date);
+        END IF;
+      END
+      $$;
     `);
-    console.log("✅ UNIQUE(user_id, date) constraint added to attendance.");
+    console.log("✅ UNIQUE(user_id, date) constraint ensured.");
     process.exit(0);
   } catch (err) {
-    if (err.code === '42710') {
-      console.log("ℹ️ Constraint already exists. No changes made.");
-    } else {
-      console.error("❌ Failed to add unique constraint:", err);
-    }
+    console.error("❌ Failed to add constraint:", err);
     process.exit(1);
   }
 })();
