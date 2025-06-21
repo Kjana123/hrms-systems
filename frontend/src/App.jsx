@@ -661,28 +661,44 @@ function ForgotPasswordForm({ onBackToLogin, darkMode }) {
     </form>
   );
 }
-
 function ResetPasswordForm({ onBackToLogin, darkMode }) {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [token, setToken] = useState('');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const tokenFromUrl = urlParams.get('token');
-    if (tokenFromUrl) {
-      setToken(tokenFromUrl);
-    } else {
-      setError('Password reset token not found in URL.');
-    }
-  }, []);
+  const urlParams = new URLSearchParams(window.location.search);
+  const tokenFromUrl = urlParams.get('token');
+  const view = urlParams.get('view');
+  console.log('URL parsed:', { view, token: tokenFromUrl });
+  if (tokenFromUrl) {
+    setToken(tokenFromUrl);
+    axios.get(`${process.env.REACT_APP_API_BASE_URL}/auth/validate-reset-token`, { params: { token: tokenFromUrl } })
+      .then(() => {
+        console.log('Token validated successfully');
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error('Token validation failed:', err);
+        setError(err.response?.data?.message || 'Invalid or expired reset token.');
+        setLoading(false);
+      });
+  } else {
+    console.error('No token found in URL');
+    setError('Password reset token not found in URL.');
+    setLoading(false);
+  }
+}, []);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setMessage('');
-    setError('');
+const handleSubmit = async (e) => {
+  e.preventDefault();
+  console.log('Submitting reset password with:', { token, newPassword });
+  setMessage('');
+  setError('');
+  // ... rest of handleSubmit
 
     if (newPassword !== confirmPassword) {
       setError('Passwords do not match.');
@@ -690,6 +706,10 @@ function ResetPasswordForm({ onBackToLogin, darkMode }) {
     }
     if (!token) {
       setError('Missing reset token.');
+      return;
+    }
+    if (newPassword.length < 6) {
+      setError('Password must be at least 6 characters long.');
       return;
     }
 
@@ -702,20 +722,20 @@ function ResetPasswordForm({ onBackToLogin, darkMode }) {
       newUrl.searchParams.delete('token');
       newUrl.searchParams.delete('view');
       window.history.replaceState({}, '', newUrl.toString());
-      setTimeout(onBackToLogin, 3000);
+      setTimeout(onBackToLogin, 5000); // Increased to 5 seconds for readability
     } catch (err) {
-      console.error('Password reset failed:', err.response?.data?.message || err.message);
-      setError(err.response?.data?.message || 'Failed to reset password. Token might be invalid or expired.');
+      console.error('Password reset failed:', err);
+      setError(err.response?.data?.message || 'Failed to reset password. Please try again.');
     }
   };
 
   return (
     <form onSubmit={handleSubmit} className="card w-full max-w-sm">
       <h2 className="text-2xl font-bold mb-4 text-center">Reset Password</h2>
-      {message && <p className="text-emerald-600 text-center mb-4">{message}</p>}
+      {message && <p className="text-blue-600 text-center mb-4">{message}</p>}
       {error && <p className="text-red-600 text-center mb-4">{error}</p>}
-      {!token && !error && <p className="text-amber-600 text-center mb-4">Loading reset token...</p>}
-      {token && !error && (
+      {loading && <p className="text-amber-600 text-center mb-4">Validating reset token...</p>}
+      {!loading && token && !error && (
         <>
           <div className="mb-4">
             <label className="form-label">New Password:</label>
@@ -728,7 +748,7 @@ function ResetPasswordForm({ onBackToLogin, darkMode }) {
             />
           </div>
           <div className="mb-4">
-            <label className="form-label">Confirm New Password:</label>
+            <label className="form-label">Confirm Password:</label>
             <input
               type="password"
               value={confirmPassword}
@@ -748,7 +768,7 @@ function ResetPasswordForm({ onBackToLogin, darkMode }) {
       <button
         type="button"
         onClick={onBackToLogin}
-        className="btn text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 w-full mt-2"
+        className="btn text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300 w-full mt-2"
       >
         Back to Login
       </button>
