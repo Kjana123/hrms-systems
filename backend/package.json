@@ -5,7 +5,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
    "start": "node index.js",
-  "init-db": "node backend/scripts/init-db.js && node backend/scripts/init-tables.js && node backend/scripts/add-created-at.js && node backend/scripts/add-constraints.js && node backend/scripts/fix-role-constraint.js && node backend/scripts/init-password-reset-table.js"
+  "init-db": "node scripts/init-db.js && node scripts/init-tables.js && node scripts/add-created-at.js && node scripts/add-constraints.js && node scripts/fix-role-constraint.js && node scripts/init-password-reset-table.js"
   },
   "keywords": [],
   "author": "",
