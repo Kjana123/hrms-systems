@@ -568,16 +568,23 @@ function LoginForm({ setToken, onForgotPassword, darkMode, toggleDarkMode }) {
   const [password, setPassword] = useState('');
 
   const handleLogin = async e => {
-    e.preventDefault();
-    try {
-      const res = await axios.post(`${process.env.REACT_APP_API_BASE_URL}/auth/login`, { email, password });
-      setToken(res.data.token);
-      localStorage.setItem('token', res.data.token);
-    } catch (err) {
-      console.error('Login failed:', err.response?.data?.message || err.message);
-      alert('Login failed: ' + (err.response?.data?.message || 'Invalid credentials.'));
-    }
-  };
+  e.preventDefault();
+  try {
+    const res = await axios.post(`${process.env.REACT_APP_API_BASE_URL}/auth/login`, {
+      email,
+      password
+    });
+
+    setToken(res.data.token);
+    localStorage.setItem('token', res.data.token);
+
+    // ✅ Save the user object too
+    localStorage.setItem('user', JSON.stringify(res.data.user));
+  } catch (err) {
+    console.error('Login failed:', err.response?.data?.message || err.message);
+    alert('Login failed: ' + (err.response?.data?.message || 'Invalid credentials.'));
+  }
+};
 
   return (
     <form onSubmit={handleLogin} className="card w-full max-w-sm">
