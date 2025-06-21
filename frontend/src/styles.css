@@ -1,0 +1,39 @@
+
+body {
+  font-family: Arial, sans-serif;
+  margin: 0;
+  padding: 0;
+}
+
+button {
+  cursor: pointer;
+  background-color: #2979ff;
+  border: none;
+  color: white;
+  padding: 8px 16px;
+  margin: 4px 2px;
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
+}
+
+button:hover {
+  background-color: #1565c0;
+}
+
+.tabs button {
+  background-color: transparent;
+  color: inherit;
+  border: 2px solid transparent;
+  font-size: 1rem;
+  padding: 8px 16px;
+  margin-right: 10px;
+  border-radius: 5px;
+}
+
+.tabs button:hover {
+  border-color: #2979ff;
+}
+
+.tabs button:focus, .tabs button.active {
+  border-color: #2979ff;
+}
