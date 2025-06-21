@@ -40,12 +40,15 @@ pool.connect((err, client, release) => {
   release();
 });
 
-// Nodemailer setup
+const nodemailer = require('nodemailer');
+
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.secureserver.net',
+  port: 465,
+  secure: true, // true for 465, false for 587
   auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
+    user: process.env.EMAIL_USER, // info@unitedsolutionsplus.in
+    pass: process.env.EMAIL_PASS  // Your GoDaddy email password
   }
 });
 
