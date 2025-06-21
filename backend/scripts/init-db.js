@@ -26,8 +26,10 @@ VALUES (
   '$2b$10$DcB2ZnySh6zZDF5PVme05uvxSeNNqIqH5wZ4E0TnWB1osTP7sFlWe', -- password = 123456
   'Test User'
 )
-ON CONFLICT (email) DO NOTHING;
+ON CONFLICT (email) 
+DO UPDATE SET password = EXCLUDED.password, name = EXCLUDED.name;
 `;
+
 
 (async () => {
   try {
