@@ -10,38 +10,40 @@ const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 
-// Log environment variables for debugging (remove sensitive values in production)
 console.log('Environment variables:', {
   DB_USER: process.env.DB_USER,
   DB_HOST: process.env.DB_HOST,
   DB_NAME: process.env.DB_NAME,
   DB_PORT: process.env.DB_PORT,
-  DATABASE_URL: process.env.DATABASE_URL ? '[Set]' : undefined,
-  JWT_SECRET: process.env.JWT_SECRET ? '[Set]' : undefined,
+  DB_PASS: process.env.DB_PASS ? '[Set]' : '[Missing]',
+  JWT_SECRET: process.env.JWT_SECRET ? '[Set]' : '[Missing]',
   EMAIL_USER: process.env.EMAIL_USER,
-  EMAIL_PASS: process.env.EMAIL_PASS ? '[Set]' : undefined,
-  CRON_API_KEY: process.env.CRON_API_KEY ? '[Set]' : undefined,
-  FRONTEND_URL: process.env.FRONTEND_URL
+  EMAIL_PASS: process.env.EMAIL_PASS ? '[Set]' : '[Missing]',
+  CRON_API_KEY: process.env.CRON_API_KEY ? '[Set]' : '[Missing]',
+  FRONTEND_URL: process.env.FRONTEND_URL,
 });
 
-// PostgreSQL connection (supports DATABASE_URL for Render, individual creds for local)
+// ✅ Direct PostgreSQL pool setup using env vars
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || `postgres://${process.env.DB_USER}:${process.env.DB_PASS}@${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}`,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+  user: process.env.DB_USER,
+  host: process.env.DB_HOST,
+  database: process.env.DB_NAME,
+  password: process.env.DB_PASS,
+  port: process.env.DB_PORT,
+  ssl: { rejectUnauthorized: false }  // Required by Render PostgreSQL
 });
 
-
-// Test database connection
+// ✅ Test connection
 pool.connect((err, client, release) => {
   if (err) {
-    console.error('Database connection error:', err.stack);
+    console.error('❌ Database connection error:', err.stack);
     return;
   }
-  console.log('Database connected successfully');
+  console.log('✅ Database connected successfully');
   release();
 });
 
-
+module.exports = pool;
 const transporter = nodemailer.createTransport({
   host: 'smtp.secureserver.net',
   port: 465,
