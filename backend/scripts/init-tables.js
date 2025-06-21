@@ -1,3 +1,14 @@
+const { Pool } = require('pg');
+
+const pool = new Pool({
+  user: process.env.DB_USER,
+  host: process.env.DB_HOST,
+  database: process.env.DB_NAME,
+  password: process.env.DB_PASS,
+  port: process.env.DB_PORT,
+  ssl: { rejectUnauthorized: false }
+});
+
 const initTables = `
 CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
@@ -14,7 +25,7 @@ CREATE TABLE IF NOT EXISTS attendance (
   check_in TIMESTAMP,
   check_out TIMESTAMP,
   status TEXT,
-  UNIQUE (user_id, date)  -- ✅ Fix 2
+  UNIQUE (user_id, date)
 );
 
 CREATE TABLE IF NOT EXISTS corrections (
@@ -23,7 +34,7 @@ CREATE TABLE IF NOT EXISTS corrections (
   date DATE,
   reason TEXT,
   status TEXT,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP  -- ✅ Fix 1
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS leaves (
@@ -36,7 +47,6 @@ CREATE TABLE IF NOT EXISTS leaves (
 );
 `;
 
-
 (async () => {
   try {
     await pool.query(initTables);
@@ -47,3 +57,4 @@ CREATE TABLE IF NOT EXISTS leaves (
     process.exit(1);
   }
 })();
+
