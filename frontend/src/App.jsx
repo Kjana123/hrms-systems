@@ -615,26 +615,33 @@ function ForgotPasswordForm({ onBackToLogin, darkMode }) {
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setMessage('');
     setError('');
+    setLoading(true);
+    console.log('Submitting forgot password for email:', email);
+
     try {
       const res = await axios.post(`${process.env.REACT_APP_API_BASE_URL}/auth/forgot-password`, { email });
+      console.log('Forgot password response:', res.data);
       setMessage(res.data.message);
       setEmail('');
     } catch (err) {
       console.error('Forgot password request failed:', err.response?.data?.message || err.message);
       setError(err.response?.data?.message || 'Failed to send reset email. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
     <form onSubmit={handleSubmit} className="card w-full max-w-sm">
       <h2 className="text-2xl font-bold mb-4 text-center">Forgot Password</h2>
-      {message && <p className="text-emerald-600 text-center mb-4">{message}</p>}
-      {error && <p className="text-red-600 text-center mb-4">{error}</p>}
+      {message && <p className="text-blue-600 text-center mb-3">{message}</p>}
+      {error && <p className="text-red-500 text-center mb-3">{error}</p>}
       <div className="mb-4">
         <label className="form-label">Email:</label>
         <input
@@ -643,24 +650,27 @@ function ForgotPasswordForm({ onBackToLogin, darkMode }) {
           onChange={(e) => setEmail(e.target.value)}
           required
           className="form-input"
+          disabled={loading}
         />
       </div>
       <button
         type="submit"
         className="btn btn-primary w-full"
+        disabled={loading}
       >
-        Send Reset Link
+        {loading ? 'Sending...' : 'Send Reset Link'}
       </button>
       <button
         type="button"
         onClick={onBackToLogin}
-        className="btn text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 w-full mt-2"
+        className="btn text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300 w-full mt-2"
       >
         Back to Login
       </button>
     </form>
   );
 }
+
 function ResetPasswordForm({ onBackToLogin, darkMode }) {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -670,35 +680,35 @@ function ResetPasswordForm({ onBackToLogin, darkMode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-  const urlParams = new URLSearchParams(window.location.search);
-  const tokenFromUrl = urlParams.get('token');
-  const view = urlParams.get('view');
-  console.log('URL parsed:', { view, token: tokenFromUrl });
-  if (tokenFromUrl) {
-    setToken(tokenFromUrl);
-    axios.get(`${process.env.REACT_APP_API_BASE_URL}/auth/validate-reset-token`, { params: { token: tokenFromUrl } })
-      .then(() => {
-        console.log('Token validated successfully');
-        setLoading(false);
-      })
-      .catch(err => {
-        console.error('Token validation failed:', err);
-        setError(err.response?.data?.message || 'Invalid or expired reset token.');
-        setLoading(false);
-      });
-  } else {
-    console.error('No token found in URL');
-    setError('Password reset token not found in URL.');
-    setLoading(false);
-  }
-}, []);
+    const urlParams = new URLSearchParams(window.location.search);
+    const tokenFromUrl = urlParams.get('token');
+    const view = urlParams.get('view');
+    console.log('URL parsed:', { view, token: tokenFromUrl });
 
-const handleSubmit = async (e) => {
-  e.preventDefault();
-  console.log('Submitting reset password with:', { token, newPassword });
-  setMessage('');
-  setError('');
-  // ... rest of handleSubmit
+    if (tokenFromUrl) {
+      setToken(tokenFromUrl);
+      axios.get(`${process.env.REACT_APP_API_BASE_URL}/auth/validate-reset-token`, { params: { token: tokenFromUrl } })
+        .then((res) => {
+          console.log('Token validation response:', res.data);
+          setLoading(false);
+        })
+        .catch((err) => {
+          console.error('Token validation failed:', err.response?.data?.message || err.message);
+          setError(err.response?.data?.message || 'Invalid or expired reset token.');
+          setLoading(false);
+        });
+    } else {
+      console.error('No token found in URL');
+      setError('Password reset token not found in URL.');
+      setLoading(false);
+    }
+  }, []);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    console.log('Submitting reset password with:', { token, newPassword });
+    setMessage('');
+    setError('');
 
     if (newPassword !== confirmPassword) {
       setError('Passwords do not match.');
@@ -715,6 +725,7 @@ const handleSubmit = async (e) => {
 
     try {
       const res = await axios.post(`${process.env.REACT_APP_API_BASE_URL}/auth/reset-password`, { token, newPassword });
+      console.log('Reset password response:', res.data);
       setMessage(res.data.message);
       setNewPassword('');
       setConfirmPassword('');
@@ -722,9 +733,9 @@ const handleSubmit = async (e) => {
       newUrl.searchParams.delete('token');
       newUrl.searchParams.delete('view');
       window.history.replaceState({}, '', newUrl.toString());
-      setTimeout(onBackToLogin, 5000); // Increased to 5 seconds for readability
+      setTimeout(onBackToLogin, 5000);
     } catch (err) {
-      console.error('Password reset failed:', err);
+      console.error('Password reset failed:', err.response?.data?.message || err.message);
       setError(err.response?.data?.message || 'Failed to reset password. Please try again.');
     }
   };
@@ -732,9 +743,9 @@ const handleSubmit = async (e) => {
   return (
     <form onSubmit={handleSubmit} className="card w-full max-w-sm">
       <h2 className="text-2xl font-bold mb-4 text-center">Reset Password</h2>
-      {message && <p className="text-blue-600 text-center mb-4">{message}</p>}
-      {error && <p className="text-red-600 text-center mb-4">{error}</p>}
-      {loading && <p className="text-amber-600 text-center mb-4">Validating reset token...</p>}
+      {message && <p className="text-blue-600 text-center mb-3">{message}</p>}
+      {error && <p className="text-red-500 text-center mb-3">{error}</p>}
+      {loading && <p className="text-amber-600 text-center mb-3">Validating reset token...</p>}
       {!loading && token && !error && (
         <>
           <div className="mb-4">
