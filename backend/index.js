@@ -44,6 +44,7 @@ pool.connect((err, client, release) => {
 });
 
 module.exports = pool;
+
 const transporter = nodemailer.createTransport({
   host: 'smtp.secureserver.net',
   port: 465,
@@ -56,9 +57,13 @@ const transporter = nodemailer.createTransport({
 
 // Middleware
 app.use(cors({
-  origin: [process.env.FRONTEND_URL || 'http://localhost:3000'],
+  origin: [
+    'http://localhost:3000',
+    process.env.FRONTEND_URL || 'https://hrms-systems.onrender.com'
+  ],
   credentials: true
 }));
+
 app.use(express.json());
 
 // JWT authentication middleware
