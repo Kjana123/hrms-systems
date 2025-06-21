@@ -126,6 +126,8 @@ app.post('/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
 
+    console.log("Login request:", { email, password }); // ✅ ← THIS GOES HERE
+
     if (!email || !password) {
       return res.status(400).json({ message: 'Email and password are required.' });
     }
@@ -133,12 +135,20 @@ app.post('/auth/login', async (req, res) => {
     const { rows } = await pool.query('SELECT * FROM users WHERE email=$1', [email]);
     const user = rows[0];
 
+    if (!user) {
+      console.log("❌ User not found");
+    } else {
+      console.log("✅ User found:", user.email);
+      const match = await bcrypt.compare(password, user.password);
+      console.log("🔑 Password match:", match);
+    }
+
     if (!user || !(await bcrypt.compare(password, user.password))) {
       return res.status(401).json({ message: 'Invalid credentials.' });
     }
 
     if (!process.env.JWT_SECRET) {
-      console.error('JWT_SECRET is not defined for token signing!');
+      console.error('JWT_SECRET is not defined!');
       return res.status(500).json({ message: 'Server configuration error.' });
     }
 
@@ -148,21 +158,17 @@ app.post('/auth/login', async (req, res) => {
       { expiresIn: '1h' }
     );
 
-    console.log('Login successful:', { userId: user.id, role: user.role });
-    res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+    console.log('✅ Login successful for:', user.email);
+    res.json({
+      token,
+      user: { id: user.id, name: user.name, email: user.email, role: user.role }
+    });
   } catch (error) {
-    console.error('User login error:', error);
+    console.error('🔥 User login error:', error);
     res.status(500).json({ message: 'Server error during login.' });
   }
-  console.log("User found:", user);
-if (user) {
-  console.log("Stored password hash:", user.password);
-  const passwordMatch = await bcrypt.compare(password, user.password);
-  console.log("Password match result:", passwordMatch);
-}
 });
 
-console.log("Login request:", { email, password });
 
 
 app.post('/auth/forgot-password', async (req, res) => {
