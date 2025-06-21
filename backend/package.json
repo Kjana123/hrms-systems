@@ -4,7 +4,8 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node scripts/init-db.js && node index.js"
+    "init-tables": "node scripts/init-tables.js",
+    "start": "node scripts/init-tables.js && node scripts/init-db.js && node index.js"
   },
   "keywords": [],
   "author": "",
