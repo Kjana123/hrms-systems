@@ -55,16 +55,26 @@ const transporter = nodemailer.createTransport({
   }
 });
 
-// Middleware
+const allowedOrigins = [
+  'http://localhost:3000',
+  'https://hrms-systems.onrender.com',
+  'https://attendance.unitedsolutionsplus.in'
+];
+
 app.use(cors({
-  origin: [
-    'http://localhost:3000',
-    process.env.FRONTEND_URL || 'https://hrms-systems.onrender.com'
-  ],
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like curl, Postman)
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true
 }));
 
 app.use(express.json());
+
 
 // JWT authentication middleware
 function authenticate(req, res, next) {
