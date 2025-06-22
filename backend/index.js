@@ -1,81 +1,74 @@
+
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const { Pool } = require('pg');
-const moment = require('moment');
+const moment = require('moment-timezone');
 const nodemailer = require('nodemailer');
 const { v4: uuidv4 } = require('uuid');
+const { Parser } = require('json2csv');
+const cookieParser = require('cookie-parser');
 
 const app = express();
 
 console.log('Environment variables:', {
-  DB_USER: process.env.DB_USER,
-  DB_HOST: process.env.DB_HOST,
-  DB_NAME: process.env.DB_NAME,
-  DB_PORT: process.env.DB_PORT,
-  DB_PASS: process.env.DB_PASS ? '[Set]' : '[Missing]',
+  DATABASE_URL: process.env.DATABASE_URL ? '[Set]' : '[Missing]',
   JWT_SECRET: process.env.JWT_SECRET ? '[Set]' : '[Missing]',
+  REFRESH_SECRET: process.env.REFRESH_SECRET ? '[Set]' : '[Missing]',
   EMAIL_USER: process.env.EMAIL_USER,
   EMAIL_PASS: process.env.EMAIL_PASS ? '[Set]' : '[Missing]',
   CRON_API_KEY: process.env.CRON_API_KEY ? '[Set]' : '[Missing]',
   FRONTEND_URL: process.env.FRONTEND_URL,
 });
 
-
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false, // Required by Neon
-  },
+  ssl: { rejectUnauthorized: false },
 });
 
-// ✅ Test connection
 pool.connect((err, client, release) => {
   if (err) {
-    console.error("❌ Database connection error:", err.stack);
+    console.error('❌ Database connection error:', err.stack);
     return;
   }
-  console.log("✅ Database connected successfully");
+  console.log('✅ Database connected successfully');
   release();
 });
 
 module.exports = pool;
 
-
 const transporter = nodemailer.createTransport({
   host: 'smtp.secureserver.net',
   port: 465,
-  secure: true, // true for 465, false for 587
+  secure: true,
   auth: {
-    user: process.env.EMAIL_USER, // info@unitedsolutionsplus.in
-    pass: process.env.EMAIL_PASS  // Your GoDaddy email password
-  }
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
 });
 
 const allowedOrigins = [
   'http://localhost:3000',
   'https://hrms-systems.onrender.com',
-  'https://attendance.unitedsolutionsplus.in'
+  'https://attendance.unitedsolutionsplus.in',
 ];
 
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (like curl, Postman)
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
     }
   },
-  credentials: true
+  credentials: true,
 }));
 
 app.use(express.json());
+app.use(cookieParser());
 
-
-// JWT authentication middleware
 function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
   const token = authHeader && authHeader.split(' ')[1];
@@ -104,24 +97,39 @@ function authenticate(req, res, next) {
   }
 }
 
-// Auth routes
 app.post('/auth/register', async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password, role, shift_type } = req.body;
 
-    if (!name || !email || !password || !role) {
-      return res.status(400).json({ message: 'All fields (name, email, password, role) are required.' });
+    if (!name || !email || !password || !role || !shift_type) {
+      return res.status(400).json({ message: 'Name, email, password, role, and shift_type are required.' });
     }
-   if (role !== 'employee' && role !== 'admin') {
-  return res.status(400).json({ message: 'Role must be "employee" or "admin".' });
-}
+
+    if (!['employee', 'admin'].includes(role)) {
+      return res.status(400).json({ message: 'Role must be "employee" or "admin".' });
+    }
+
+    if (!['day', 'evening'].includes(shift_type)) {
+      return res.status(400).json({ message: 'Shift_type must be "day" or "evening".' });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ message: 'Invalid email format.' });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ message: 'Password must be at least 6 characters long.' });
+    }
 
     const hashed = await bcrypt.hash(password, 10);
-    await pool.query(
-      'INSERT INTO users (name, email, password, role) VALUES ($1, $2, $3, $4)',
-      [name, email, hashed, role]
+    const { rows } = await pool.query(
+      'INSERT INTO users (name, email, password, role, shift_type) VALUES ($1, $2, $3, $4, $5) RETURNING id, name, email, role, shift_type',
+      [name, email, hashed, role, shift_type]
     );
-    res.status(201).json({ message: 'User registered successfully.' });
+
+    console.log('User registered:', { id: rows[0].id, email });
+    res.status(201).json({ message: 'User registered successfully.', user: rows[0] });
   } catch (error) {
     console.error('User registration error:', error);
     if (error.code === '23505') {
@@ -134,22 +142,7 @@ app.post('/auth/register', async (req, res) => {
 app.post('/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    console.log("🛂 Login request body:", req.body);
-
-const allUsers = await pool.query('SELECT * FROM users');
-console.log("🧾 All users in DB:", allUsers.rows);
-
-if (allUsers.rows.length) {
-  const testUser = allUsers.rows.find(u => u.email === email);
-  if (testUser) {
-    const bcrypt = require('bcrypt');
-    const match = await bcrypt.compare(password, testUser.password);
-    console.log("🔑 Password match:", match);
-  }
-}
-
-
-    console.log("Login request:", { email, password }); // ✅ ← THIS GOES HERE
+    console.log('Login request:', { email });
 
     if (!email || !password) {
       return res.status(400).json({ message: 'Email and password are required.' });
@@ -159,37 +152,86 @@ if (allUsers.rows.length) {
     const user = rows[0];
 
     if (!user) {
-      console.log("❌ User not found");
-    } else {
-      console.log("✅ User found:", user.email);
-      const match = await bcrypt.compare(password, user.password);
-      console.log("🔑 Password match:", match);
-    }
-
-    if (!user || !(await bcrypt.compare(password, user.password))) {
+      console.log('❌ User not found');
       return res.status(401).json({ message: 'Invalid credentials.' });
     }
 
-    if (!process.env.JWT_SECRET) {
-      console.error('JWT_SECRET is not defined!');
-      return res.status(500).json({ message: 'Server configuration error.' });
+    const match = await bcrypt.compare(password, user.password);
+    console.log('🔑 Password match:', match);
+
+    if (!match) {
+      return res.status(401).json({ message: 'Invalid credentials.' });
     }
 
-    const token = jwt.sign(
+    const accessToken = jwt.sign(
       { id: user.id, role: user.role },
       process.env.JWT_SECRET,
       { expiresIn: '1h' }
     );
 
-    console.log('✅ Login successful for:', user.email);
+    const refreshToken = jwt.sign(
+      { id: user.id },
+      process.env.REFRESH_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'Strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    console.log('🧍 User logged in:', { id: user.id, email: user.email });
     res.json({
-      token,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role }
+      accessToken,
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, shift_type: user.shift_type },
     });
   } catch (error) {
     console.error('🔥 User login error:', error);
     res.status(500).json({ message: 'Server error during login.' });
   }
+});
+
+app.post('/auth/refresh', async (req, res) => {
+  try {
+    const refreshToken = req.cookies.refreshToken;
+    if (!refreshToken) {
+      return res.status(401).json({ message: 'Refresh token missing.' });
+    }
+
+    if (!process.env.REFRESH_SECRET) {
+      console.error('REFRESH_SECRET is not defined!');
+      return res.status(500).json({ message: 'Server configuration error.' });
+    }
+
+    const decoded = jwt.verify(refreshToken, process.env.REFRESH_SECRET);
+    const { rows } = await pool.query('SELECT id, role, shift_type FROM users WHERE id=$1', [decoded.id]);
+    const user = rows[0];
+
+    if (!user) {
+      return res.status(401).json({ message: 'Invalid refresh token.' });
+    }
+
+    const accessToken = jwt.sign(
+      { id: user.id, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+
+    res.json({ accessToken });
+  } catch (error) {
+    console.error('Refresh token error:', error);
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ message: 'Refresh token expired.' });
+    }
+    return res.status(401).json({ message: 'Invalid refresh token.' });
+  }
+});
+
+app.post('/auth/logout', (req, res) => {
+  res.clearCookie('refreshToken');
+  res.status(200).json({ message: 'Logged out successfully.' });
 });
 
 app.post('/auth/forgot-password', async (req, res) => {
@@ -234,7 +276,7 @@ app.post('/auth/forgot-password', async (req, res) => {
         <p>This link will expire in 1 hour.</p>
         <p>If you did not request this, please ignore this email.</p>
         <p>Best regards,<br>HRMS Team</p>
-      `
+      `,
     };
 
     await transporter.sendMail(mailOptions);
@@ -318,6 +360,10 @@ app.post('/auth/change-password', authenticate, async (req, res) => {
       return res.status(400).json({ message: 'Current password and new password are required.' });
     }
 
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: 'New password must be at least 6 characters long.' });
+    }
+
     const { rows } = await pool.query('SELECT password FROM users WHERE id=$1', [userId]);
     const user = rows[0];
 
@@ -338,7 +384,82 @@ app.post('/auth/change-password', authenticate, async (req, res) => {
   }
 });
 
-// Attendance routes
+app.get('/users', authenticate, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Forbidden: Only admins can view all users.' });
+    }
+    const { rows } = await pool.query('SELECT id, name, email, role, shift_type FROM users ORDER BY name');
+    res.json(rows);
+  } catch (error) {
+    console.error('Get users error:', error);
+    res.status(500).json({ message: 'Server error getting users.' });
+  }
+});
+
+app.put('/users/update', authenticate, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Forbidden: Only admins can update user details.' });
+    }
+    const { user_id, name, email, role, shift_type } = req.body;
+
+    if (!user_id || (!name && !email && !role && !shift_type)) {
+      return res.status(400).json({ message: 'User ID and at least one field to update are required.' });
+    }
+
+    if (role && !['employee', 'admin'].includes(role)) {
+      return res.status(400).json({ message: 'Role must be "employee" or "admin".' });
+    }
+
+    if (shift_type && !['day', 'evening'].includes(shift_type)) {
+      return res.status(400).json({ message: 'Shift_type must be "day" or "evening".' });
+    }
+
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ message: 'Invalid email format.' });
+    }
+
+    const fields = [];
+    const values = [];
+    let index = 1;
+
+    if (name) {
+      fields.push(`name = $${index++}`);
+      values.push(name);
+    }
+    if (email) {
+      fields.push(`email = $${index++}`);
+      values.push(email);
+    }
+    if (role) {
+      fields.push(`role = $${index++}`);
+      values.push(role);
+    }
+    if (shift_type) {
+      fields.push(`shift_type = $${index++}`);
+      values.push(shift_type);
+    }
+
+    values.push(user_id);
+    const queryText = `UPDATE users SET ${fields.join(', ')} WHERE id = $${index} RETURNING id, name, email, role, shift_type`;
+    const { rows } = await pool.query(queryText, values);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+
+    console.log('User updated:', { id: rows[0].id, email: rows[0].email });
+    res.json({ message: 'User updated successfully.', user: rows[0] });
+  } catch (error) {
+    console.error('Update user error:', error);
+    if (error.code === '23505') {
+      return res.status(409).json({ message: 'Email is already registered.' });
+    }
+    res.status(500).json({ message: 'Server error updating user.' });
+  }
+});
+
 app.get('/attendance', authenticate, async (req, res) => {
   try {
     const { rows } = await pool.query(
@@ -354,11 +475,28 @@ app.get('/attendance', authenticate, async (req, res) => {
 
 app.post('/attendance/checkin', authenticate, async (req, res) => {
   try {
-    const date = new Date().toISOString().split('T')[0];
+    const date = moment.tz('Asia/Kolkata').format('YYYY-MM-DD');
+    const now = moment.tz('Asia/Kolkata');
+    const userId = req.user.id;
+
+    const { rows: userRows } = await pool.query('SELECT shift_type FROM users WHERE id=$1', [userId]);
+    const shiftType = userRows[0]?.shift_type || 'day';
+
+    const shiftStart = shiftType === 'day'
+      ? moment.tz(`${date} 09:00`, 'Asia/Kolkata')
+      : moment.tz(`${date} 21:00`, 'Asia/Kolkata');
+
+    const status = now.isAfter(shiftStart) ? 'Late' : 'Present';
+
     const result = await pool.query(
-      'INSERT INTO attendance (user_id, date, check_in) VALUES ($1, $2, CURRENT_TIMESTAMP) ON CONFLICT (user_id, date) DO UPDATE SET check_in = CURRENT_TIMESTAMP RETURNING *',
-      [req.user.id, date]
+      `INSERT INTO attendance (user_id, date, check_in, status)
+       VALUES ($1, $2, CURRENT_TIMESTAMP, $3)
+       ON CONFLICT (user_id, date)
+       DO UPDATE SET check_in = CURRENT_TIMESTAMP, status = $3
+       RETURNING *`,
+      [userId, date, status]
     );
+
     console.log('Check-in recorded:', result.rows[0]);
     res.status(200).json({ message: 'Checked in successfully.', data: result.rows[0] });
   } catch (error) {
@@ -369,18 +507,24 @@ app.post('/attendance/checkin', authenticate, async (req, res) => {
 
 app.post('/attendance/checkout', authenticate, async (req, res) => {
   try {
-    const date = new Date().toISOString().split('T')[0];
+    const date = moment.tz('Asia/Kolkata').format('YYYY-MM-DD');
     const { rows } = await pool.query(
-      `UPDATE attendance SET
-         check_out = CURRENT_TIMESTAMP,
-         status = CASE WHEN (EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - check_in)) / 3600) >= 8.5 THEN 'present' ELSE 'absent' END
+      `UPDATE attendance
+       SET check_out = CURRENT_TIMESTAMP,
+           status = CASE
+             WHEN status = 'Late' THEN 'Late'
+             WHEN (EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - check_in)) / 3600) >= 8.5 THEN 'Present'
+             ELSE 'Absent'
+           END
        WHERE user_id=$1 AND date=$2 AND check_in IS NOT NULL AND check_out IS NULL
        RETURNING *`,
       [req.user.id, date]
     );
+
     if (rows.length === 0) {
       return res.status(400).json({ message: 'No valid check-in record found or already checked out.' });
     }
+
     console.log('Check-out recorded:', rows[0]);
     res.status(200).json({ message: 'Checked out successfully.', data: rows[0] });
   } catch (error) {
@@ -416,7 +560,7 @@ app.post('/attendance/correction-request', authenticate, async (req, res) => {
     if (!date || !reason) {
       return res.status(400).json({ message: 'Date and reason are required for correction request.' });
     }
-    if (new Date(date) > new Date()) {
+    if (moment(date).isAfter(moment(), 'day')) {
       return res.status(400).json({ message: 'Cannot request correction for a future date.' });
     }
     await pool.query(
@@ -454,16 +598,16 @@ app.post('/attendance/correction-review', authenticate, async (req, res) => {
 
         if (attendanceRows.length > 0) {
           await pool.query(
-            `UPDATE attendance SET status='present' WHERE user_id=$1 AND date=$2`,
+            `UPDATE attendance SET status='Present' WHERE user_id=$1 AND date=$2`,
             [user_id, date]
           );
         } else {
           await pool.query(
-            `INSERT INTO attendance (user_id, date, status) VALUES ($1, $2, 'present')`,
+            `INSERT INTO attendance (user_id, date, status) VALUES ($1, $2, 'Present')`,
             [user_id, date]
           );
         }
-        console.log(`Attendance for user ${user_id} on ${date} set to 'present' due to approved correction.`);
+        console.log(`Attendance for user ${user_id} on ${date} set to 'Present' due to approved correction.`);
       }
     }
 
@@ -474,7 +618,6 @@ app.post('/attendance/correction-review', authenticate, async (req, res) => {
   }
 });
 
-// Leave routes
 app.get('/leaves', authenticate, async (req, res) => {
   try {
     const { rows } = await pool.query(
@@ -493,6 +636,9 @@ app.post('/leaves/apply', authenticate, async (req, res) => {
     const { from_date, to_date, reason } = req.body;
     if (!from_date || !to_date || !reason) {
       return res.status(400).json({ message: 'From date, to date, and reason are required for leave application.' });
+    }
+    if (moment(to_date).isBefore(moment(from_date))) {
+      return res.status(400).json({ message: 'To date cannot be before from date.' });
     }
     await pool.query(
       'INSERT INTO leaves (user_id, from_date, to_date, reason, status) VALUES ($1, $2, $3, $4, $5)',
@@ -538,17 +684,72 @@ app.post('/admin/leaves/update', authenticate, async (req, res) => {
   }
 });
 
-// Task routes
+app.get('/holidays', authenticate, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM holidays ORDER BY date');
+    res.json(rows);
+  } catch (error) {
+    console.error('Get holidays error:', error);
+    res.status(500).json({ message: 'Server error getting holidays.' });
+  }
+});
+
+app.get('/admin/attendance/export', authenticate, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Forbidden: Only admins can export attendance.' });
+    }
+
+    const { year, month } = req.query;
+    if (!year || !month) {
+      return res.status(400).json({ message: 'Year and month are required.' });
+    }
+
+    const startDate = moment.tz(`${year}-${month}-01`, 'Asia/Kolkata').startOf('month').format('YYYY-MM-DD');
+    const endDate = moment.tz(`${year}-${month}-01`, 'Asia/Kolkata').endOf('month').format('YYYY-MM-DD');
+
+    const { rows } = await pool.query(
+      `SELECT a.user_id, u.name, u.email, u.shift_type, a.date, a.check_in, a.check_out, a.status
+       FROM attendance a
+       JOIN users u ON a.user_id = u.id
+       WHERE a.date BETWEEN $1 AND $2
+       ORDER BY a.date, u.name`,
+      [startDate, endDate]
+    );
+
+    const fields = [
+      { label: 'User ID', value: 'user_id' },
+      { label: 'Name', value: 'name' },
+      { label: 'Email', value: 'email' },
+      { label: 'Shift Type', value: 'shift_type' },
+      { label: 'Date', value: 'date' },
+      { label: 'Check In', value: row => row.check_in ? moment(row.check_in).tz('Asia/Kolkata').format('HH:mm:ss') : '' },
+      { label: 'Check Out', value: row => row.check_out ? moment(row.check_out).tz('Asia/Kolkata').format('HH:mm:ss') : '' },
+      { label: 'Status', value: 'status' },
+    ];
+
+    const json2csvParser = new Parser({ fields });
+    const csv = json2csvParser.parse(rows);
+
+    res.header('Content-Type', 'text/csv');
+    res.attachment(`attendance_${year}_${month}.csv`);
+    res.send(csv);
+  } catch (error) {
+    console.error('Export attendance error:', error);
+    res.status(500).json({ message: 'Server error exporting attendance.' });
+  }
+});
+
 app.post('/tasks/mark-forgotten-checkout-absent', async (req, res) => {
   try {
     if (req.headers['x-api-key'] !== process.env.CRON_API_KEY) {
       return res.status(403).json({ message: 'Unauthorized' });
     }
-    const yesterday = moment().subtract(1, 'days').format('YYYY-MM-DD');
+    const yesterday = moment.tz('Asia/Kolkata').subtract(1, 'days').format('YYYY-MM-DD');
     await pool.query(
       `UPDATE attendance
-       SET status = 'absent'
-       WHERE date = $1 AND check_out IS NULL`,
+       SET status = 'Absent'
+       WHERE date = $1 AND check_out IS NULL AND status != 'Late'`,
       [yesterday]
     );
     console.log(`Marked forgotten check-outs for ${yesterday} as absent.`);
@@ -563,9 +764,9 @@ app.get('/test-email', async (req, res) => {
   try {
     const mailOptions = {
       from: process.env.EMAIL_USER,
-      to: 'test@example.com', // Replace with your test email
+      to: 'test@example.com',
       subject: 'Test Email from HRMS',
-      text: 'This is a test email from your HRMS application.'
+      text: 'This is a test email from your HRMS application.',
     };
     await transporter.sendMail(mailOptions);
     console.log('Test email sent to test@example.com');
@@ -576,30 +777,5 @@ app.get('/test-email', async (req, res) => {
   }
 });
 
-app.get('/auth/reset-reset-token', async (req, res) => {
-  try {
-    const { token } = req.query;
-    if (!token) {
-      return res.status(400).json({ message: 'Token is required.' });
-    }
-
-    const { rows } = await pool.query(
-      'SELECT user_id, expires_at FROM password_reset_tokens WHERE token=$1',
-      [token]
-    );
-    const resetRecord = rows[0];
-
-    if (!resetRecord || new Date() > new Date(resetRecord.expires_at)) {
-      return res.status(400).json({ message: 'Invalid or expired reset token.' });
-    }
-
-    res.status(200).json({ message: 'Token is valid.' });
-  } catch (error) {
-    console.error('Token validation error:', error);
-    res.status(500).json({ message: 'Server error during token validation.' });
-  }
-});
-
-// Start server
 const PORT = process.env.PORT || 3001;
-app.listen(3001, '0.0.0.0', () => console.log("✅ Server running on 0.0.0.0:3001"));
+app.listen(PORT, '0.0.0.0', () => console.log(`✅ Server running on 0.0.0.0:${PORT}`));
