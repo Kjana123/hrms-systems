@@ -63,7 +63,6 @@ axiosInstance.interceptors.response.use(
   }
 );
 
-
 // AuthForms Component
 const AuthForms = ({ authView, setToken, setUser, setRole, darkMode, toggleDarkMode }) => {
   const [email, setEmail] = useState('');
@@ -75,9 +74,9 @@ const AuthForms = ({ authView, setToken, setUser, setRole, darkMode, toggleDarkM
     try {
       const res = await axiosInstance.post('/auth/login', { email, password });
       // IMPORTANT: Store token as 'accessToken' to match retrieval logic
-      localStorage.setItem('accessToken', res.data.token); // Assuming res.data.token is the actual token
+      localStorage.setItem('accessToken', res.data.accessToken); // <-- CHANGE THIS LINE
       localStorage.setItem('user', JSON.stringify(res.data.user));
-      setToken(res.data.token);
+      setToken(res.data.accessToken); // <-- CHANGE THIS LINE as well
       // IMPORTANT: Directly update user and role states in App.jsx
       setUser(res.data.user);
       setRole(res.data.user.role);
