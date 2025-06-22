@@ -12,7 +12,7 @@ const cors = require('cors'); // Import cors
 const app = express();
 app.use(express.json());
 app.use(cors({ // Enable CORS for all routes
-  origin: ['http://localhost:3000', 'https://hrms-systems.onrender.com'], // Replace with your frontend domain in production
+  origin: ['http://localhost:3000', 'https://attendance.unitedsolutionsplus.in'], // Replace with your frontend domain in production
   credentials: true,
 }));
 
