@@ -1,4 +1,3 @@
-// backend/scripts/init-db.js
 require('dotenv').config(); // Only needed locally
 
 const { Pool } = require('pg');
@@ -21,11 +20,13 @@ const insertTestUser = `
 INSERT INTO users (email, password, name)
 VALUES (
   'test@example.com',
-  '$2b$10$eAScQSdf/WEwxscRjtowFehMo9ltFmP4xTdraFtFQnveaP4UWJSCa', -- password = 123456
+  '$2b$10$eAScQSdf/WEwxscRjtowFehMo9ltFmP4xTdraFtFQnveaP4UWJSCa',
   'Test User'
 )
 ON CONFLICT (email) 
-DO UPDATE SET password = EXCLUDED.password, name = EXCLUDED.name;
+DO UPDATE SET 
+  password = EXCLUDED.password,
+  name = EXCLUDED.name;
 `;
 
 (async () => {
