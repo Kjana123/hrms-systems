@@ -1,470 +1,272 @@
+require('dotenv').config(); // This line MUST be at the very top of your file
 
-require('dotenv').config();
 const express = require('express');
-const cors = require('cors');
+const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcrypt');
-const { Pool } = require('pg');
-const moment = require('moment-timezone');
 const nodemailer = require('nodemailer');
-const { v4: uuidv4 } = require('uuid');
-const { Parser } = require('json2csv');
-const cookieParser = require('cookie-parser');
+const moment = require('moment-timezone');
+const pool = require('./db');
+// const adminController = require('./adminController'); // Assuming this exists for other admin routes - REMOVED this line
+const cors = require('cors'); // Import cors
 
 const app = express();
+app.use(express.json());
+app.use(cors({ // Enable CORS for all routes
+  origin: ['http://localhost:3000', 'https://your-frontend-domain.com'], // Replace with your frontend domain in production
+  credentials: true,
+}));
 
-console.log('Environment variables:', {
-  DATABASE_URL: process.env.DATABASE_URL ? '[Set]' : '[Missing]',
-  JWT_SECRET: process.env.JWT_SECRET ? '[Set]' : '[Missing]',
-  REFRESH_SECRET: process.env.REFRESH_SECRET ? '[Set]' : '[Missing]',
-  EMAIL_USER: process.env.EMAIL_USER,
-  EMAIL_PASS: process.env.EMAIL_PASS ? '[Set]' : '[Missing]',
-  CRON_API_KEY: process.env.CRON_API_KEY ? '[Set]' : '[Missing]',
-  FRONTEND_URL: process.env.FRONTEND_URL,
-});
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
-});
-
-pool.connect((err, client, release) => {
-  if (err) {
-    console.error('❌ Database connection error:', err.stack);
-    return;
-  }
-  console.log('✅ Database connected successfully');
-  release();
-});
-
-module.exports = pool;
-
+// Configure nodemailer transporter
 const transporter = nodemailer.createTransport({
-  host: 'smtp.secureserver.net',
-  port: 465,
-  secure: true,
+  service: 'gmail',
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
 });
 
-const allowedOrigins = [
-  'http://localhost:3000',
-  'https://hrms-systems.onrender.com',
-  'https://attendance.unitedsolutionsplus.in',
-];
-
-app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-}));
-
-app.use(express.json());
-app.use(cookieParser());
-
-function authenticate(req, res, next) {
+// Middleware to authenticate JWT token
+const authenticate = async (req, res, next) => {
   const authHeader = req.headers.authorization;
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) {
-    console.warn('No token provided for:', req.originalUrl);
-    return res.status(401).json({ message: 'Authentication token missing.' });
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ message: 'No token provided.' });
   }
 
-  if (!process.env.JWT_SECRET) {
-    console.error('JWT_SECRET is not defined!');
-    return res.status(500).json({ message: 'Server configuration error.' });
-  }
-
+  const token = authHeader.split(' ')[1];
   try {
-    const user = jwt.verify(token, process.env.JWT_SECRET);
-    console.log('JWT decoded:', { id: user.id, role: user.role });
-    req.user = user;
+    // Ensure process.env.JWT_SECRET is actually loaded here
+    if (!process.env.JWT_SECRET) {
+        console.error('JWT_SECRET is not defined in environment variables.');
+        return res.status(500).json({ message: 'Server configuration error: JWT secret missing.' });
+    }
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    console.log('JWT decoded:', { id: decoded.id, role: decoded.role });
+    req.user = decoded; // Attach decoded user info to the request
     next();
-  } catch (err) {
-    console.error('JWT verification error:', err.message);
-    if (err.name === 'TokenExpiredError') {
-      return res.status(401).json({ message: 'Authentication token expired.' });
-    }
-    return res.status(403).json({ message: 'Invalid authentication token.' });
-  }
-}
-
-app.post('/auth/register', async (req, res) => {
-  try {
-    const { name, email, password, role, shift_type } = req.body;
-
-    if (!name || !email || !password || !role || !shift_type) {
-      return res.status(400).json({ message: 'Name, email, password, role, and shift_type are required.' });
-    }
-
-    if (!['employee', 'admin'].includes(role)) {
-      return res.status(400).json({ message: 'Role must be "employee" or "admin".' });
-    }
-
-    if (!['day', 'evening'].includes(shift_type)) {
-      return res.status(400).json({ message: 'Shift_type must be "day" or "evening".' });
-    }
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({ message: 'Invalid email format.' });
-    }
-
-    if (password.length < 6) {
-      return res.status(400).json({ message: 'Password must be at least 6 characters long.' });
-    }
-
-    const hashed = await bcrypt.hash(password, 10);
-    const { rows } = await pool.query(
-      'INSERT INTO users (name, email, password, role, shift_type) VALUES ($1, $2, $3, $4, $5) RETURNING id, name, email, role, shift_type',
-      [name, email, hashed, role, shift_type]
-    );
-
-    console.log('User registered:', { id: rows[0].id, email });
-    res.status(201).json({ message: 'User registered successfully.', user: rows[0] });
   } catch (error) {
-    console.error('User registration error:', error);
-    if (error.code === '23505') {
-      return res.status(409).json({ message: 'Email is already registered.' });
+    console.error('Token verification failed:', error.message);
+    res.status(401).json({ message: 'Invalid or expired token.' });
+  }
+};
+
+// Middleware to check if user is an admin
+const authorizeAdmin = (req, res, next) => {
+  if (req.user && req.user.role === 'admin') {
+    next();
+  } else {
+    res.status(403).json({ message: 'Access denied. Admin rights required.' });
+  }
+};
+
+// User Registration
+app.post('/register', async (req, res) => {
+  try {
+    const { name, email, password, employee_id, role, shift_type } = req.body;
+
+    if (!name || !email || !password || !employee_id || !role || !shift_type) {
+      return res.status(400).json({ message: 'All fields are required.' });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const result = await pool.query(
+      'INSERT INTO users (name, email, password_hash, employee_id, role, shift_type) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, name, email, employee_id, role, shift_type',
+      [name, email, hashedPassword, employee_id, role, shift_type]
+    );
+    res.status(201).json({ message: 'User registered successfully', user: result.rows[0] });
+  } catch (error) {
+    console.error('Registration error:', error);
+    if (error.code === '23505') { // Unique violation code for PostgreSQL
+      return res.status(409).json({ message: 'Employee ID or Email already exists.' });
     }
     res.status(500).json({ message: 'Server error during registration.' });
   }
 });
 
+// User Login
 app.post('/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    console.log('Login request:', { email });
-
-    if (!email || !password) {
-      return res.status(400).json({ message: 'Email and password are required.' });
+    const { rows } = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    if (rows.length === 0) {
+      return res.status(400).json({ message: 'Invalid credentials.' });
     }
 
-    const { rows } = await pool.query('SELECT * FROM users WHERE email=$1', [email]);
     const user = rows[0];
-
-    if (!user) {
-      console.log('❌ User not found');
-      return res.status(401).json({ message: 'Invalid credentials.' });
+    // Explicitly ensure password_hash is a non-empty string before comparing
+    if (typeof user.password_hash !== 'string' || !user.password_hash.trim()) {
+      console.error('Login error: password_hash is not a valid string or is empty for user:', user.email);
+      return res.status(400).json({ message: 'Invalid credentials.' });
+    }
+    
+    // Ensure process.env.JWT_SECRET is actually loaded here for signing
+    if (!process.env.JWT_SECRET || !process.env.REFRESH_TOKEN_SECRET) {
+        console.error('JWT or Refresh Token secret is not defined in environment variables.');
+        return res.status(500).json({ message: 'Server configuration error: JWT secrets missing.' });
     }
 
-    const match = await bcrypt.compare(password, user.password);
-    console.log('🔑 Password match:', match);
-
-    if (!match) {
-      return res.status(401).json({ message: 'Invalid credentials.' });
+    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+    if (!isPasswordValid) {
+      return res.status(400).json({ message: 'Invalid credentials.' });
     }
 
     const accessToken = jwt.sign(
-      { id: user.id, role: user.role },
+      { id: user.id, role: user.role, employee_id: user.employee_id, name: user.name },
       process.env.JWT_SECRET,
       { expiresIn: '1h' }
     );
-
     const refreshToken = jwt.sign(
       { id: user.id },
-      process.env.REFRESH_SECRET,
+      process.env.REFRESH_TOKEN_SECRET,
       { expiresIn: '7d' }
     );
 
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'Strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+    // Store refresh token (e.g., in a secure, httpOnly cookie or database)
+    // For simplicity, we'll just send it, but a robust solution would store it.
+    res.cookie('refreshToken', refreshToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 7 * 24 * 60 * 60 * 1000 });
 
-    console.log('🧍 User logged in:', { id: user.id, email: user.email });
-    res.json({
-      accessToken,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role, shift_type: user.shift_type },
-    });
+    res.json({ accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, employee_id: user.employee_id, shift_type: user.shift_type } });
   } catch (error) {
-    console.error('🔥 User login error:', error);
+    console.error('Login error:', error);
     res.status(500).json({ message: 'Server error during login.' });
   }
 });
 
+// Token Refresh
 app.post('/auth/refresh', async (req, res) => {
+  const refreshToken = req.cookies?.refreshToken; // Assuming refresh token is in an httpOnly cookie
+  if (!refreshToken) {
+    return res.status(401).json({ message: 'No refresh token provided.' });
+  }
+
   try {
-    const refreshToken = req.cookies.refreshToken;
-    if (!refreshToken) {
-      return res.status(401).json({ message: 'Refresh token missing.' });
+    // Ensure process.env.REFRESH_TOKEN_SECRET is actually loaded here
+    if (!process.env.REFRESH_TOKEN_SECRET) {
+        console.error('REFRESH_TOKEN_SECRET is not defined in environment variables.');
+        return res.status(500).json({ message: 'Server configuration error: Refresh Token secret missing.' });
     }
-
-    if (!process.env.REFRESH_SECRET) {
-      console.error('REFRESH_SECRET is not defined!');
-      return res.status(500).json({ message: 'Server configuration error.' });
+    const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
+    const { rows } = await pool.query('SELECT id, name, email, role, employee_id, shift_type FROM users WHERE id = $1', [decoded.id]);
+    if (rows.length === 0) {
+      return res.status(403).json({ message: 'Invalid refresh token.' });
     }
-
-    const decoded = jwt.verify(refreshToken, process.env.REFRESH_SECRET);
-    const { rows } = await pool.query('SELECT id, role, shift_type FROM users WHERE id=$1', [decoded.id]);
     const user = rows[0];
-
-    if (!user) {
-      return res.status(401).json({ message: 'Invalid refresh token.' });
-    }
-
-    const accessToken = jwt.sign(
-      { id: user.id, role: user.role },
+    const newAccessToken = jwt.sign(
+      { id: user.id, role: user.role, employee_id: user.employee_id, name: user.name },
       process.env.JWT_SECRET,
       { expiresIn: '1h' }
     );
-
-    res.json({ accessToken });
+    res.json({ accessToken: newAccessToken, user });
   } catch (error) {
     console.error('Refresh token error:', error);
-    if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({ message: 'Refresh token expired.' });
-    }
-    return res.status(401).json({ message: 'Invalid refresh token.' });
+    res.status(403).json({ message: 'Invalid or expired refresh token.' });
   }
 });
 
+// User Logout
 app.post('/auth/logout', (req, res) => {
-  res.clearCookie('refreshToken');
-  res.status(200).json({ message: 'Logged out successfully.' });
+  res.clearCookie('refreshToken', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict' });
+  res.json({ message: 'Logged out successfully.' });
 });
 
-app.post('/auth/forgot-password', async (req, res) => {
-  try {
-    const { email } = req.body;
-    console.log('Forgot password request for:', email);
-    if (!email) {
-      return res.status(400).json({ message: 'Email is required.' });
-    }
-
-    const { rows } = await pool.query('SELECT id, name FROM users WHERE email=$1', [email]);
-    const user = rows[0];
-
-    if (!user) {
-      console.log('No user found with email:', email);
-      return res.status(200).json({ message: 'If a matching account is found, a password reset link has been sent to your email.' });
-    }
-
-    const resetToken = uuidv4();
-    const expiresAt = new Date(Date.now() + 3600 * 1000);
-    console.log('Generated reset token:', resetToken, 'expires at:', expiresAt);
-
-    await pool.query(
-      'INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE SET token = $2, expires_at = $3',
-      [user.id, resetToken, expiresAt]
-    );
-    console.log('Reset token saved for user_id:', user.id);
-
-    const frontendUrl = process.env.FRONTEND_URL || 'https://attendance.unitedsolutionsplus.in';
-    const resetLink = `${frontendUrl}/?view=resetPassword&token=${resetToken}`;
-    console.log('Reset link:', resetLink);
-
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: email,
-      subject: 'Password Reset Request for HRMS',
-      html: `
-        <p>Hello ${user.name},</p>
-        <p>You have requested a password reset for your HRMS account.</p>
-        <p>Please click on the following link to reset your password:</p>
-        <p><a href="${resetLink}">${resetLink}</a></p>
-        <p>This link will expire in 1 hour.</p>
-        <p>If you did not request this, please ignore this email.</p>
-        <p>Best regards,<br>HRMS Team</p>
-      `,
-    };
-
-    await transporter.sendMail(mailOptions);
-    console.log('Password reset email sent to:', email);
-    res.status(200).json({ message: 'If a matching account is found, a password reset link has been sent to your email.' });
-  } catch (error) {
-    console.error('Forgot password error:', error.message, error.stack);
-    res.status(500).json({ message: 'Server error during password reset request.', error: error.message });
-  }
-});
-
-app.post('/auth/reset-password', async (req, res) => {
-  try {
-    const { token, newPassword } = req.body;
-    console.log('Reset password request with token:', token);
-    if (!token || !newPassword) {
-      return res.status(400).json({ message: 'Token and new password are required.' });
-    }
-
-    const { rows } = await pool.query(
-      'SELECT user_id, expires_at FROM password_reset_tokens WHERE token=$1',
-      [token]
-    );
-    const resetRecord = rows[0];
-
-    if (!resetRecord || new Date() > new Date(resetRecord.expires_at)) {
-      console.log('Invalid or expired token:', token);
-      return res.status(400).json({ message: 'Invalid or expired reset token.' });
-    }
-
-    const hashed = await bcrypt.hash(newPassword, 10);
-    await pool.query(
-      'UPDATE users SET password=$1 WHERE id=$2',
-      [hashed, resetRecord.user_id]
-    );
-    console.log('Password updated for user_id:', resetRecord.user_id);
-
-    await pool.query('DELETE FROM password_reset_tokens WHERE token=$1', [token]);
-    console.log('Reset token deleted:', token);
-
-    res.status(200).json({ message: 'Password has been reset successfully.' });
-  } catch (error) {
-    console.error('Reset password error:', error.message, error.stack);
-    res.status(500).json({ message: 'Server error during password reset.', error: error.message });
-  }
-});
-
-app.get('/auth/validate-reset-token', async (req, res) => {
-  try {
-    const { token } = req.query;
-    console.log('Validating reset token:', token);
-    if (!token) {
-      return res.status(400).json({ message: 'Token is required.' });
-    }
-
-    const { rows } = await pool.query(
-      'SELECT user_id, expires_at FROM password_reset_tokens WHERE token=$1',
-      [token]
-    );
-    const resetRecord = rows[0];
-
-    if (!resetRecord || new Date() > new Date(resetRecord.expires_at)) {
-      console.log('Invalid or expired token:', token);
-      return res.status(400).json({ message: 'Invalid or expired reset token.' });
-    }
-
-    console.log('Token is valid for user_id:', resetRecord.user_id);
-    res.status(200).json({ message: 'Token is valid.' });
-  } catch (error) {
-    console.error('Token validation error:', error.message, error.stack);
-    res.status(500).json({ message: 'Server error during token validation.', error: error.message });
-  }
-});
-
+// Change Password
 app.post('/auth/change-password', authenticate, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
     const userId = req.user.id;
 
-    if (!currentPassword || !newPassword) {
-      return res.status(400).json({ message: 'Current password and new password are required.' });
-    }
-
-    if (newPassword.length < 6) {
-      return res.status(400).json({ message: 'New password must be at least 6 characters long.' });
-    }
-
-    const { rows } = await pool.query('SELECT password FROM users WHERE id=$1', [userId]);
-    const user = rows[0];
-
-    if (!user || !(await bcrypt.compare(currentPassword, user.password))) {
-      return res.status(401).json({ message: 'Invalid current password.' });
-    }
-
-    const hashedNewPassword = await bcrypt.hash(newPassword, 10);
-    await pool.query(
-      'UPDATE users SET password=$1 WHERE id=$2',
-      [hashedNewPassword, userId]
-    );
-
-    res.status(200).json({ message: 'Password has been changed successfully.' });
-  } catch (error) {
-    console.error('Change password error:', error);
-    res.status(500).json({ message: 'Server error during password change.' });
-  }
-});
-
-app.get('/users', authenticate, async (req, res) => {
-  try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Forbidden: Only admins can view all users.' });
-    }
-    const { rows } = await pool.query('SELECT id, name, email, role, shift_type FROM users ORDER BY name');
-    res.json(rows);
-  } catch (error) {
-    console.error('Get users error:', error);
-    res.status(500).json({ message: 'Server error getting users.' });
-  }
-});
-
-app.put('/users/update', authenticate, async (req, res) => {
-  try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Forbidden: Only admins can update user details.' });
-    }
-    const { user_id, name, email, role, shift_type } = req.body;
-
-    if (!user_id || (!name && !email && !role && !shift_type)) {
-      return res.status(400).json({ message: 'User ID and at least one field to update are required.' });
-    }
-
-    if (role && !['employee', 'admin'].includes(role)) {
-      return res.status(400).json({ message: 'Role must be "employee" or "admin".' });
-    }
-
-    if (shift_type && !['day', 'evening'].includes(shift_type)) {
-      return res.status(400).json({ message: 'Shift_type must be "day" or "evening".' });
-    }
-
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return res.status(400).json({ message: 'Invalid email format.' });
-    }
-
-    const fields = [];
-    const values = [];
-    let index = 1;
-
-    if (name) {
-      fields.push(`name = $${index++}`);
-      values.push(name);
-    }
-    if (email) {
-      fields.push(`email = $${index++}`);
-      values.push(email);
-    }
-    if (role) {
-      fields.push(`role = $${index++}`);
-      values.push(role);
-    }
-    if (shift_type) {
-      fields.push(`shift_type = $${index++}`);
-      values.push(shift_type);
-    }
-
-    values.push(user_id);
-    const queryText = `UPDATE users SET ${fields.join(', ')} WHERE id = $${index} RETURNING id, name, email, role, shift_type`;
-    const { rows } = await pool.query(queryText, values);
-
+    const { rows } = await pool.query('SELECT password_hash FROM users WHERE id = $1', [userId]);
     if (rows.length === 0) {
       return res.status(404).json({ message: 'User not found.' });
     }
 
-    console.log('User updated:', { id: rows[0].id, email: rows[0].email });
-    res.json({ message: 'User updated successfully.', user: rows[0] });
-  } catch (error) {
-    console.error('Update user error:', error);
-    if (error.code === '23505') {
-      return res.status(409).json({ message: 'Email is already registered.' });
+    const user = rows[0];
+    const isPasswordValid = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!isPasswordValid) {
+      return res.status(400).json({ message: 'Invalid current password.' });
     }
-    res.status(500).json({ message: 'Server error updating user.' });
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hashedNewPassword, userId]);
+
+    res.json({ message: 'Password updated successfully.' });
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({ message: 'Server error changing password.' });
   }
 });
 
+
+// Check-in
+app.post('/attendance/checkin', authenticate, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+    const checkinTime = moment().tz('Asia/Kolkata').format('HH:mm:ss');
+    const userShiftType = req.user.shift_type;
+
+    // Check if user already checked in today
+    const existingAttendance = await pool.query(
+      'SELECT * FROM attendance WHERE user_id = $1 AND date = $2',
+      [userId, today]
+    );
+
+    if (existingAttendance.rows.length > 0) {
+      return res.status(400).json({ message: 'Already checked in today.' });
+    }
+
+    let status = 'present';
+    const checkinMoment = moment().tz('Asia/Kolkata');
+    let expectedCheckinHour;
+    if (userShiftType === 'evening') {
+      expectedCheckinHour = 21; // 9 PM
+    } else {
+      expectedCheckinHour = 9; // 9 AM
+    }
+
+    if (checkinMoment.hour() > expectedCheckinHour || (checkinMoment.hour() === expectedCheckinHour && checkinMoment.minute() > 0)) {
+      status = 'late';
+    }
+
+    const result = await pool.query(
+      'INSERT INTO attendance (user_id, date, check_in, status) VALUES ($1, $2, $3, $4) RETURNING *',
+      [userId, today, checkinTime, status]
+    );
+    res.status(201).json({ message: 'Check-in successful!', data: result.rows[0] });
+  } catch (error) {
+    console.error('Check-in error:', error);
+    res.status(500).json({ message: 'Server error during check-in.' });
+  }
+});
+
+// Check-out
+app.post('/attendance/checkout', authenticate, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+    const checkoutTime = moment().tz('Asia/Kolkata').format('HH:mm:ss');
+
+    const result = await pool.query(
+      'UPDATE attendance SET check_out = $1 WHERE user_id = $2 AND date = $3 AND check_out IS NULL RETURNING *',
+      [checkoutTime, userId, today]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(400).json({ message: 'No active check-in found for today or already checked out.' });
+    }
+    res.json({ message: 'Check-out successful!', data: result.rows[0] });
+  } catch (error) {
+    console.error('Check-out error:', error);
+    res.status(500).json({ message: 'Server error during check-out.' });
+  }
+});
+
+// Get User Attendance
 app.get('/attendance', authenticate, async (req, res) => {
   try {
+    const userId = req.user.id;
     const { rows } = await pool.query(
-      'SELECT * FROM attendance WHERE user_id=$1 ORDER BY date DESC',
-      [req.user.id]
+      'SELECT * FROM attendance WHERE user_id = $1 ORDER BY date DESC',
+      [userId]
     );
     res.json(rows);
   } catch (error) {
@@ -473,220 +275,113 @@ app.get('/attendance', authenticate, async (req, res) => {
   }
 });
 
-app.post('/attendance/checkin', authenticate, async (req, res) => {
-  try {
-    const date = moment.tz('Asia/Kolkata').format('YYYY-MM-DD');
-    const now = moment.tz('Asia/Kolkata');
-    const userId = req.user.id;
-
-    const { rows: userRows } = await pool.query('SELECT shift_type FROM users WHERE id=$1', [userId]);
-    const shiftType = userRows[0]?.shift_type || 'day';
-
-    const shiftStart = shiftType === 'day'
-      ? moment.tz(`${date} 09:00`, 'Asia/Kolkata')
-      : moment.tz(`${date} 21:00`, 'Asia/Kolkata');
-
-    const status = now.isAfter(shiftStart) ? 'Late' : 'Present';
-
-    const result = await pool.query(
-      `INSERT INTO attendance (user_id, date, check_in, status)
-       VALUES ($1, $2, CURRENT_TIMESTAMP, $3)
-       ON CONFLICT (user_id, date)
-       DO UPDATE SET check_in = CURRENT_TIMESTAMP, status = $3
-       RETURNING *`,
-      [userId, date, status]
-    );
-
-    console.log('Check-in recorded:', result.rows[0]);
-    res.status(200).json({ message: 'Checked in successfully.', data: result.rows[0] });
-  } catch (error) {
-    console.error('Check-in error:', error);
-    res.status(500).json({ message: 'Server error during check-in.' });
-  }
-});
-
-app.post('/attendance/checkout', authenticate, async (req, res) => {
-  try {
-    const date = moment.tz('Asia/Kolkata').format('YYYY-MM-DD');
-    const { rows } = await pool.query(
-      `UPDATE attendance
-       SET check_out = CURRENT_TIMESTAMP,
-           status = CASE
-             WHEN status = 'Late' THEN 'Late'
-             WHEN (EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - check_in)) / 3600) >= 8.5 THEN 'Present'
-             ELSE 'Absent'
-           END
-       WHERE user_id=$1 AND date=$2 AND check_in IS NOT NULL AND check_out IS NULL
-       RETURNING *`,
-      [req.user.id, date]
-    );
-
-    if (rows.length === 0) {
-      return res.status(400).json({ message: 'No valid check-in record found or already checked out.' });
-    }
-
-    console.log('Check-out recorded:', rows[0]);
-    res.status(200).json({ message: 'Checked out successfully.', data: rows[0] });
-  } catch (error) {
-    console.error('Check-out error:', error);
-    res.status(500).json({ message: 'Server error during check-out.' });
-  }
-});
-
-app.get('/attendance/corrections', authenticate, async (req, res) => {
-  try {
-    let queryText;
-    let queryParams;
-
-    if (req.user.role === 'admin') {
-      queryText = 'SELECT c.*, u.name as user_name FROM corrections c JOIN users u ON c.user_id = u.id ORDER BY created_at DESC';
-      queryParams = [];
-    } else {
-      queryText = 'SELECT * FROM corrections WHERE user_id=$1 ORDER BY created_at DESC';
-      queryParams = [req.user.id];
-    }
-
-    const { rows } = await pool.query(queryText, queryParams);
-    res.json(rows);
-  } catch (error) {
-    console.error('Get corrections error:', error);
-    res.status(500).json({ message: 'Server error getting corrections.' });
-  }
-});
-
+// Request Attendance Correction
 app.post('/attendance/correction-request', authenticate, async (req, res) => {
   try {
     const { date, reason } = req.body;
-    if (!date || !reason) {
-      return res.status(400).json({ message: 'Date and reason are required for correction request.' });
-    }
-    if (moment(date).isAfter(moment(), 'day')) {
-      return res.status(400).json({ message: 'Cannot request correction for a future date.' });
-    }
-    await pool.query(
-      'INSERT INTO corrections (user_id, date, reason, status) VALUES ($1, $2, $3, $4)',
-      [req.user.id, date, reason, 'pending']
+    const userId = req.user.id;
+    const userName = req.user.name;
+    const employeeId = req.user.employee_id;
+
+    // Check if a correction request for this date already exists and is pending
+    const existingRequest = await pool.query(
+      'SELECT * FROM attendance_corrections WHERE user_id = $1 AND date = $2 AND status = $3',
+      [userId, date, 'pending']
     );
-    res.status(201).json({ message: 'Correction request submitted successfully.' });
+
+    if (existingRequest.rows.length > 0) {
+      return res.status(400).json({ message: 'A pending correction request for this date already exists.' });
+    }
+
+    const result = await pool.query(
+      'INSERT INTO attendance_corrections (user_id, user_name, employee_id, date, reason, status) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+      [userId, userName, employeeId, date, reason, 'pending']
+    );
+    res.status(201).json({ message: 'Correction request submitted successfully!', data: result.rows[0] });
   } catch (error) {
     console.error('Correction request error:', error);
     res.status(500).json({ message: 'Server error submitting correction request.' });
   }
 });
 
-app.post('/attendance/correction-review', authenticate, async (req, res) => {
-  try {
-    const { id, status } = req.body;
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Forbidden: Only admins can review corrections.' });
-    }
-    if (!id || !['approved', 'rejected'].includes(status)) {
-      return res.status(400).json({ message: 'Correction ID and a valid status ("approved" or "rejected") are required.' });
-    }
-
-    await pool.query('UPDATE corrections SET status=$1 WHERE id=$2', [status, id]);
-
-    if (status === 'approved') {
-      const { rows: correctionRows } = await pool.query('SELECT user_id, date FROM corrections WHERE id=$1', [id]);
-      if (correctionRows.length > 0) {
-        const { user_id, date } = correctionRows[0];
-
-        const { rows: attendanceRows } = await pool.query(
-          'SELECT id FROM attendance WHERE user_id=$1 AND date=$2',
-          [user_id, date]
-        );
-
-        if (attendanceRows.length > 0) {
-          await pool.query(
-            `UPDATE attendance SET status='Present' WHERE user_id=$1 AND date=$2`,
-            [user_id, date]
-          );
-        } else {
-          await pool.query(
-            `INSERT INTO attendance (user_id, date, status) VALUES ($1, $2, 'Present')`,
-            [user_id, date]
-          );
-        }
-        console.log(`Attendance for user ${user_id} on ${date} set to 'Present' due to approved correction.`);
-      }
-    }
-
-    res.status(200).json({ message: 'Correction reviewed successfully.' });
-  } catch (error) {
-    console.error('Correction review error:', error);
-    res.status(500).json({ message: 'Server error reviewing correction.' });
-  }
-});
-
-app.get('/leaves', authenticate, async (req, res) => {
-  try {
-    const { rows } = await pool.query(
-      'SELECT * FROM leaves WHERE user_id=$1 ORDER BY from_date DESC',
-      [req.user.id]
-    );
-    res.json(rows);
-  } catch (error) {
-    console.error('Get leaves error:', error);
-    res.status(500).json({ message: 'Server error getting leave records.' });
-  }
-});
-
+// Apply Leave
 app.post('/leaves/apply', authenticate, async (req, res) => {
   try {
     const { from_date, to_date, reason } = req.body;
-    if (!from_date || !to_date || !reason) {
-      return res.status(400).json({ message: 'From date, to date, and reason are required for leave application.' });
+    const userId = req.user.id;
+    const userName = req.user.name;
+    const employeeId = req.user.employee_id;
+
+    if (!moment(from_date).isValid() || !moment(to_date).isValid() || moment(from_date).isAfter(moment(to_date))) {
+      return res.status(400).json({ message: 'Invalid date range provided.' });
     }
-    if (moment(to_date).isBefore(moment(from_date))) {
-      return res.status(400).json({ message: 'To date cannot be before from date.' });
-    }
-    await pool.query(
-      'INSERT INTO leaves (user_id, from_date, to_date, reason, status) VALUES ($1, $2, $3, $4, $5)',
-      [req.user.id, from_date, to_date, reason, 'pending']
+
+    const result = await pool.query(
+      'INSERT INTO leaves (user_id, user_name, employee_id, from_date, to_date, reason, status) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+      [userId, userName, employeeId, from_date, to_date, reason, 'pending']
     );
-    res.status(201).json({ message: 'Leave application submitted successfully.' });
+    res.status(201).json({ message: 'Leave application submitted!', data: result.rows[0] });
   } catch (error) {
     console.error('Leave application error:', error);
     res.status(500).json({ message: 'Server error submitting leave application.' });
   }
 });
 
-app.get('/admin/leaves', authenticate, async (req, res) => {
+// Get User Leaves
+app.get('/leaves', authenticate, async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Forbidden: Only admins can view all leave requests.' });
-    }
+    const userId = req.user.id;
     const { rows } = await pool.query(
-      'SELECT leaves.*, users.name FROM leaves JOIN users ON leaves.user_id = users.id ORDER BY from_date DESC'
+      'SELECT * FROM leaves WHERE user_id = $1 ORDER BY from_date DESC',
+      [userId]
     );
     res.json(rows);
   } catch (error) {
-    console.error('Admin get leaves error:', error);
-    res.status(500).json({ message: 'Server error getting all leave records.' });
+    console.error('Get leaves error:', error);
+    res.status(500).json({ message: 'Server error getting leaves.' });
   }
 });
 
-app.post('/admin/leaves/update', authenticate, async (req, res) => {
+// Request Leave Cancellation (Employee)
+app.post('/leaves/cancel-request', authenticate, async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Forbidden: Only admins can update leave requests.' });
-    }
-    const { leave_id, status } = req.body;
-    if (!leave_id || !['approved', 'rejected'].includes(status)) {
-      return res.status(400).json({ message: 'Leave ID and a valid status ("approved" or "rejected") are required.' });
+    const { leave_id } = req.body;
+    const userId = req.user.id;
+
+    const { rows } = await pool.query('SELECT * FROM leaves WHERE id = $1 AND user_id = $2', [leave_id, userId]);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Leave request not found or you do not have permission.' });
     }
 
-    await pool.query('UPDATE leaves SET status=$1 WHERE id=$2', [status, leave_id]);
-    res.status(200).json({ message: 'Leave request updated successfully.' });
+    const leave = rows[0];
+
+    // Only allow cancellation request for 'approved' leaves
+    if (leave.status !== 'approved') {
+      return res.status(400).json({ message: 'Only approved leaves can be requested for cancellation.' });
+    }
+
+    // Check if a cancellation request is already pending
+    if (leave.status === 'cancellation_pending') {
+      // Removed the unintended characters at the end of the message
+      return res.status(400).json({ message: 'Cancellation request for this leave is already pending.' });
+    }
+
+    await pool.query('UPDATE leaves SET status = $1 WHERE id = $2', ['cancellation_pending', leave_id]);
+    res.json({ message: 'Leave cancellation request submitted successfully.' });
   } catch (error) {
-    console.error('Admin update leave error:', error);
-    res.status(500).json({ message: 'Server error updating leave request.' });
+    console.error('Leave cancellation request error:', error);
+    res.status(500).json({ message: 'Server error processing cancellation request.' });
   }
 });
 
+// Get Holidays
 app.get('/holidays', authenticate, async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM holidays ORDER BY date');
+    const { year } = req.query;
+    const targetYear = year || moment().tz('Asia/Kolkata').year();
+
+    const { rows } = await pool.query('SELECT * FROM holidays WHERE EXTRACT(YEAR FROM date)=$1 ORDER BY date', [targetYear]);
     res.json(rows);
   } catch (error) {
     console.error('Get holidays error:', error);
@@ -694,88 +389,452 @@ app.get('/holidays', authenticate, async (req, res) => {
   }
 });
 
-app.get('/admin/attendance/export', authenticate, async (req, res) => {
+// Admin Controller Routes (using adminController for now, but extending functionality here)
+
+// Admin: Get all correction requests
+app.get('/admin/attendance/corrections', authenticate, authorizeAdmin, async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Forbidden: Only admins can export attendance.' });
+    const { rows } = await pool.query(`
+      SELECT ac.*, u.name as user_name, u.employee_id
+      FROM attendance_corrections ac
+      JOIN users u ON ac.user_id = u.id
+      ORDER BY ac.date DESC, ac.status ASC
+    `);
+    res.json(rows);
+  } catch (error) {
+    console.error('Admin get all corrections error:', error);
+    res.status(500).json({ message: 'Server error getting all corrections.' });
+  }
+});
+
+// Admin: Review attendance correction (approve/reject)
+app.post('/admin/attendance/correction-review', authenticate, authorizeAdmin, async (req, res) => {
+  try {
+    const { id, status } = req.body;
+    const adminName = req.user.name; // Get admin's name from token
+
+    if (!id || !['approved', 'rejected'].includes(status)) {
+      return res.status(400).json({ message: 'Invalid correction ID or status.' });
     }
 
+    const { rows } = await pool.query('SELECT * FROM attendance_corrections WHERE id=$1', [id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Correction request not found.' });
+    }
+
+    const correction = rows[0];
+    if (correction.status !== 'pending') {
+      return res.status(400).json({ message: 'Correction request already processed.' });
+    }
+
+    await pool.query(
+      'UPDATE attendance_corrections SET status=$1, assigned_admin_name=$2 WHERE id=$3',
+      [status, adminName, id]
+    );
+
+    // If approved, create or update attendance record
+    if (status === 'approved') {
+      const { user_id, date } = correction;
+      const userResult = await pool.query('SELECT shift_type FROM users WHERE id = $1', [user_id]);
+      const userShiftType = userResult.rows[0].shift_type;
+
+      // Construct full timestamp strings for check_in and check_out
+      const correctedDateMoment = moment.tz(date, 'YYYY-MM-DD', 'Asia/Kolkata');
+
+      let defaultCheckIn;
+      let defaultCheckOut;
+
+      if (userShiftType === 'evening') {
+        defaultCheckIn = correctedDateMoment.clone().hour(21).minute(0).second(0).toISOString(); // 9 PM same day
+        // Evening shift checkout is usually next day morning
+        defaultCheckOut = correctedDateMoment.clone().add(1, 'day').hour(5).minute(0).second(0).toISOString(); // 5 AM next day
+      } else {
+        defaultCheckIn = correctedDateMoment.clone().hour(9).minute(0).second(0).toISOString(); // 9 AM same day
+        defaultCheckOut = correctedDateMoment.clone().hour(17).minute(0).second(0).toISOString(); // 5 PM same day
+      }
+
+      await pool.query(
+        'INSERT INTO attendance (user_id, date, check_in, check_out, status) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (user_id, date) DO UPDATE SET check_in = EXCLUDED.check_in, check_out = EXCLUDED.check_out, status = EXCLUDED.status',
+        [user_id, date, defaultCheckIn, defaultCheckOut, 'present']
+      );
+
+      // --- NEW LOGIC: Update overlapping approved leave records ---
+      await pool.query(
+          `UPDATE leaves
+           SET status = 'overridden_by_correction', assigned_admin_name = $1
+           WHERE user_id = $2
+             AND $3 BETWEEN from_date AND to_date
+             AND status = 'approved'`, // Only affect approved leaves
+          [adminName, user_id, date]
+      );
+      // --- END NEW LOGIC ---
+    }
+    res.json({ message: `Correction request ${status}.` });
+  } catch (error) {
+    console.error('Correction review error:', error);
+    res.status(500).json({ message: 'Server error processing correction.' });
+  }
+});
+
+// Admin: Get all leave requests
+app.get('/admin/leaves', authenticate, authorizeAdmin, async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT l.*, u.name as user_name, u.employee_id
+      FROM leaves l
+      JOIN users u ON l.user_id = u.id
+      ORDER BY l.from_date DESC, l.status ASC
+    `);
+    res.json(rows);
+  } catch (error) {
+    console.error('Admin get all leaves error:', error);
+    res.status(500).json({ message: 'Server error getting all leaves.' });
+  }
+});
+
+// Admin: Update leave status (approve/reject for initial application)
+app.post('/admin/leaves/update', authenticate, authorizeAdmin, async (req, res) => {
+  try {
+    const { leave_id, status } = req.body;
+    const adminName = req.user.name;
+
+    if (!leave_id || !['approved', 'rejected'].includes(status)) {
+      return res.status(400).json({ message: 'Invalid leave ID or status.' });
+    }
+
+    const { rows } = await pool.query('SELECT * FROM leaves WHERE id=$1', [leave_id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Leave request not found.' });
+    }
+
+    const leave = rows[0];
+    // Only allow update if the current status is 'pending' and not a cancellation request
+    if (leave.status !== 'pending') {
+      return res.status(400).json({ message: 'Leave request already processed or is a cancellation request.' });
+    }
+
+    await pool.query(
+      'UPDATE leaves SET status=$1, assigned_admin_name=$2 WHERE id=$3',
+      [status, adminName, leave_id]
+    );
+    res.json({ message: `Leave request ${status}.` });
+  } catch (error) {
+    console.error('Leave approval error:', error);
+    res.status(500).json({ message: 'Server error processing leave.' });
+  }
+});
+
+// Admin: Update leave cancellation status
+app.post('/admin/leaves/update-cancellation', authenticate, authorizeAdmin, async (req, res) => {
+  try {
+    const { leave_id, status } = req.body;
+    const adminName = req.user.name;
+
+    if (!leave_id || !['cancellation_approved', 'cancellation_rejected'].includes(status)) {
+      return res.status(400).json({ message: 'Invalid leave ID or cancellation status.' });
+    }
+
+    const { rows } = await pool.query('SELECT * FROM leaves WHERE id=$1', [leave_id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Leave request not found.' });
+    }
+
+    const leave = rows[0];
+
+    // Ensure it's a pending cancellation request
+    if (leave.status !== 'cancellation_pending') {
+      return res.status(400).json({ message: 'Not a pending cancellation request.' });
+    }
+
+    let finalStatus = leave.status;
+    if (status === 'cancellation_approved') {
+      finalStatus = 'cancelled';
+    } else if (status === 'cancellation_rejected') {
+      // If cancellation is rejected, revert to the previous approved status
+      finalStatus = 'approved';
+    }
+
+    await pool.query(
+      'UPDATE leaves SET status=$1, assigned_admin_name=$2 WHERE id=$3',
+      [finalStatus, adminName, leave_id]
+    );
+    res.json({ message: `Leave cancellation ${status.replace('cancellation_', '')}.` });
+  } catch (error) {
+    console.error('Leave cancellation update error:', error);
+    res.status(500).json({ message: 'Server error processing leave cancellation.' });
+  }
+});
+
+
+// Admin: Get daily attendance for all employees
+app.get('/admin/attendance/daily', authenticate, authorizeAdmin, async (req, res) => {
+  try {
+    const { date } = req.query;
+    const targetDate = date || moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+
+    // Fetch all active users
+    const usersResult = await pool.query('SELECT id, name, employee_id, shift_type FROM users');
+    const allUsers = usersResult.rows;
+
+    // Fetch attendance for the target date
+    const attendanceResult = await pool.query(
+      'SELECT user_id, check_in, check_out, status FROM attendance WHERE date = $1',
+      [targetDate]
+    );
+    const dailyAttendanceMap = new Map();
+    attendanceResult.rows.forEach(att => {
+      dailyAttendanceMap.set(att.user_id, att);
+    });
+
+    // Fetch leaves for the target date
+    // Modified: Include 'overridden_by_correction' in the WHERE clause so these are explicitly skipped
+    const leavesResult = await pool.query(
+      'SELECT user_id, status FROM leaves WHERE $1 BETWEEN from_date AND to_date AND status = \'approved\'',
+      [targetDate]
+    );
+    const dailyLeavesMap = new Map();
+    leavesResult.rows.forEach(leave => {
+      dailyLeavesMap.set(leave.user_id, leave);
+    });
+
+    // Determine status for each user
+    const detailedAttendance = allUsers.map(user => {
+      const attendanceRecord = dailyAttendanceMap.get(user.id);
+      const leaveRecord = dailyLeavesMap.get(user.id);
+
+      let status = 'absent'; // Default to absent
+      let check_in = null;
+      let check_out = null;
+
+      if (attendanceRecord) {
+        // Ensure attendanceRecord.status is a string before replacement
+        status = String(attendanceRecord.status || 'unknown');
+        check_in = attendanceRecord.check_in;
+        check_out = attendanceRecord.check_out;
+      } else if (leaveRecord) {
+        status = 'on_leave'; // Custom status for on leave
+      }
+
+      return {
+        user_id: user.id,
+        name: user.name,
+        employee_id: user.employee_id,
+        shift_type: user.shift_type,
+        status: String(status || 'unknown').replace(/_/g, ' ').toUpperCase(), // Ensure 'status' is a string before calling replace
+        check_in: check_in ? moment(check_in, 'HH:mm:ss').format('hh:mm A') : null,
+        check_out: check_out ? moment(check_out, 'HH:mm:ss').format('hh:mm A') : null,
+      };
+    });
+
+    res.json(detailedAttendance);
+  } catch (error) {
+    console.error('Admin get daily attendance error:', error);
+    res.status(500).json({ message: 'Server error getting daily attendance.' });
+  }
+});
+
+// Admin: Get monthly summary (present days, leave days)
+app.get('/admin/analytics/monthly-summary', authenticate, authorizeAdmin, async (req, res) => {
+  try {
     const { year, month } = req.query;
+    console.log(`Analytics request for Year: ${year}, Month: ${month}`); // Added log
     if (!year || !month) {
       return res.status(400).json({ message: 'Year and month are required.' });
     }
 
-    const startDate = moment.tz(`${year}-${month}-01`, 'Asia/Kolkata').startOf('month').format('YYYY-MM-DD');
-    const endDate = moment.tz(`${year}-${month}-01`, 'Asia/Kolkata').endOf('month').format('YYYY-MM-DD');
+    // Correct moment construction for year/month
+    const startDate = moment.tz([parseInt(year), parseInt(month) - 1, 1], 'Asia/Kolkata').startOf('month');
+    const endDate = moment.tz([parseInt(year), parseInt(month) - 1, 1], 'Asia/Kolkata').endOf('month');
+    console.log(`Calculated Date Range: ${startDate.format('YYYY-MM-DD')} to ${endDate.format('YYYY-MM-DD')}`); // Added log
 
-    const { rows } = await pool.query(
-      `SELECT a.user_id, u.name, u.email, u.shift_type, a.date, a.check_in, a.check_out, a.status
-       FROM attendance a
-       JOIN users u ON a.user_id = u.id
-       WHERE a.date BETWEEN $1 AND $2
-       ORDER BY a.date, u.name`,
-      [startDate, endDate]
-    );
 
-    const fields = [
-      { label: 'User ID', value: 'user_id' },
-      { label: 'Name', value: 'name' },
-      { label: 'Email', value: 'email' },
-      { label: 'Shift Type', value: 'shift_type' },
-      { label: 'Date', value: 'date' },
-      { label: 'Check In', value: row => row.check_in ? moment(row.check_in).tz('Asia/Kolkata').format('HH:mm:ss') : '' },
-      { label: 'Check Out', value: row => row.check_out ? moment(row.check_out).tz('Asia/Kolkata').format('HH:mm:ss') : '' },
-      { label: 'Status', value: 'status' },
-    ];
+    // Fetch all users
+    const usersResult = await pool.query('SELECT id, name, employee_id FROM users');
+    const allUsers = usersResult.rows;
+    console.log(`Found ${allUsers.length} users for analytics.`); // Added log
 
-    const json2csvParser = new Parser({ fields });
-    const csv = json2csvParser.parse(rows);
+    const monthlySummary = [];
+
+    for (const user of allUsers) {
+      let presentDays = 0;
+      let leaveDays = 0;
+
+      // Count present/late days from attendance
+      const attendanceCountResult = await pool.query(
+        'SELECT COUNT(*) FROM attendance WHERE user_id = $1 AND date BETWEEN $2 AND $3 AND (status = \'present\' OR status = \'late\')',
+        [user.id, startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]
+      );
+      presentDays = parseInt(attendanceCountResult.rows[0].count, 10);
+
+      // Count approved leave days - EXCLUDING those overridden by correction
+      const leaveCountResult = await pool.query(
+        `SELECT
+           SUM(CASE
+             WHEN from_date <= $3 AND to_date >= $2
+             THEN LEAST($3, to_date) - GREATEST($2, from_date) + 1
+             ELSE 0 -- Explicitly return 0 if no overlap to prevent NULL from SUM
+           END) as total_leave_days
+         FROM leaves
+         WHERE user_id = $1
+           AND status = 'approved' -- Only count explicitly approved leaves
+           AND (from_date <= $3 AND to_date >= $2)`,
+        [user.id, startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]
+      );
+      // Ensure total_leave_days is a number, default to 0 if null
+      leaveDays = parseInt(leaveCountResult.rows[0].total_leave_days || 0, 10);
+
+      console.log(`User ${user.name} (ID: ${user.employee_id}): Present Days = ${presentDays}, Leave Days = ${leaveDays}`); // Added log
+
+      monthlySummary.push({
+        user_id: user.id,
+        name: user.name,
+        employee_id: user.employee_id,
+        present_days: presentDays,
+        leave_days: leaveDays,
+      });
+    }
+
+    console.log('Final Monthly Summary:', monthlySummary); // Added log
+    res.json(monthlySummary);
+  } catch (error) {
+    console.error('Admin get monthly summary error:', error);
+    res.status(500).json({ message: 'Server error getting monthly summary.' });
+  }
+});
+
+
+// Admin: Export attendance data to CSV (modified for per-employee filtering)
+app.get('/admin/attendance/export', authenticate, authorizeAdmin, async (req, res) => {
+  try {
+    const { year, month, employee_id, employee_name } = req.query;
+
+    if (!year || !month) {
+      return res.status(400).json({ message: 'Year and month are required for export.' });
+    }
+
+    let userId = null;
+    let empIdForHeader = ''; // For the header if employee_id is used
+    let userNameForHeader = 'All Employees'; // For the header if no specific employee
+
+    // Find user by employee_id or employee_name if provided
+    if (employee_id) {
+      const userResult = await pool.query('SELECT id, name, employee_id FROM users WHERE employee_id = $1', [employee_id]);
+      if (userResult.rows.length > 0) {
+        userId = userResult.rows[0].id;
+        userNameForHeader = userResult.rows[0].name;
+        empIdForHeader = userResult.rows[0].employee_id;
+      } else {
+        return res.status(404).json({ message: 'Employee ID not found.' });
+      }
+    } else if (employee_name) {
+      const userResult = await pool.query('SELECT id, name, employee_id FROM users WHERE name ILIKE $1', [`%${employee_name}%`]);
+      if (userResult.rows.length > 0) {
+        userId = userResult.rows[0].id;
+        userNameForHeader = userResult.rows[0].name;
+        empIdForHeader = userResult.rows[0].employee_id; // Get employee_id for header
+      } else {
+        return res.status(404).json({ message: 'Employee name not found.' });
+      }
+    }
+
+    // Correct moment construction for year/month
+    const startDate = moment.tz([parseInt(year), parseInt(month) - 1, 1], 'Asia/Kolkata').startOf('month');
+    const endDate = moment.tz([parseInt(year), parseInt(month) - 1, 1], 'Asia/Kolkata').endOf('month');
+
+    // Fetch attendance records for the specified period and user (if applicable)
+    let attendanceQuery = `SELECT * FROM attendance WHERE date BETWEEN $1 AND $2`;
+    // Modified: Fetch only leaves that are explicitly 'approved' and not 'overridden_by_correction'
+    let leaveQuery = `SELECT * FROM leaves WHERE status = 'approved' AND (from_date <= $2 AND to_date >= $1)`;
+    let holidayQuery = `SELECT * FROM holidays WHERE date BETWEEN $1 AND $2`;
+
+    const baseParams = [startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')];
+    const paramsWithUser = [...baseParams];
+
+    if (userId) {
+      attendanceQuery += ` AND user_id = $3`;
+      leaveQuery += ` AND user_id = $3`;
+      paramsWithUser.push(userId);
+    }
+
+    const attendanceResults = await pool.query(attendanceQuery, userId ? paramsWithUser : baseParams);
+    const leaveResults = await pool.query(leaveQuery, userId ? paramsWithUser : baseParams);
+    const holidayResults = await pool.query(holidayQuery, baseParams);
+
+    const attendanceMap = new Map(); // date -> { check_in, check_out, status }
+    attendanceResults.rows.forEach(row => {
+      attendanceMap.set(moment(row.date).tz('Asia/Kolkata').format('YYYY-MM-DD'), row);
+    });
+
+    const leaveDaysMap = new Map(); // date -> { reason }
+    leaveResults.rows.forEach(leave => {
+      let currentDay = moment(leave.from_date).tz('Asia/Kolkata');
+      const toDate = moment(leave.to_date).tz('Asia/Kolkata');
+      while (currentDay.isSameOrBefore(toDate)) {
+        if (currentDay.isBetween(startDate, endDate, null, '[]')) {
+          leaveDaysMap.set(currentDay.format('YYYY-MM-DD'), leave.reason);
+        }
+        currentDay.add(1, 'day');
+      }
+    });
+
+    const holidaysMap = new Map(); // date -> name
+    holidayResults.rows.forEach(holiday => {
+      holidaysMap.set(moment(holiday.date).tz('Asia/Kolkata').format('YYYY-MM-DD'), holiday.name);
+    });
+
+    let csvContent = `Date,Day of Week,Status,Check-in Time,Check-out Time,Leave Reason,Holiday Name\n`;
+
+    let currentDay = startDate.clone();
+    while (currentDay.isSameOrBefore(endDate)) {
+      const dateFormatted = currentDay.format('YYYY-MM-DD');
+      const dayOfWeek = currentDay.format('dddd');
+      let status = 'Absent';
+      let checkIn = '';
+      let checkOut = '';
+      let leaveReason = '';
+      let holidayName = '';
+
+      if (holidaysMap.has(dateFormatted)) {
+        status = 'Holiday';
+        holidayName = holidaysMap.get(dateFormatted);
+      } else if (leaveDaysMap.has(dateFormatted)) {
+        status = 'On Leave';
+        leaveReason = leaveDaysMap.get(dateFormatted);
+      } else if (attendanceMap.has(dateFormatted)) {
+        const att = attendanceMap.get(dateFormatted);
+        status = String(att.status || 'unknown') === 'present' ? 'Present' : (String(att.status || 'unknown') === 'late' ? 'Late' : 'Other');
+        checkIn = att.check_in ? moment(att.check_in, 'HH:mm:ss').format('hh:mm A') : '';
+        checkOut = att.check_out ? moment(att.check_out, 'HH:mm:ss').format('hh:mm A') : '';
+      }
+
+      csvContent += `${dateFormatted},${dayOfWeek},${status},"${checkIn}","${checkOut}","${leaveReason}","${holidayName}"\n`;
+      currentDay.add(1, 'day');
+    }
+
+    // Add a header row for the employee name if a specific employee was selected
+    let header = '';
+    if (userId) {
+      header = `Employee Name: ${userNameForHeader} (ID: ${empIdForHeader || 'N/A'})\nMonth: ${moment.tz([parseInt(year), parseInt(month) - 1, 1], 'Asia/Kolkata').format('MMMM Westeros')}\n\n`;
+    } else {
+      header = `Attendance Report for All Employees\nMonth: ${moment.tz([parseInt(year), parseInt(month) - 1, 1], 'Asia/Kolkata').format('MMMM Westeros')}\n\n`;
+    }
+    csvContent = header + csvContent;
 
     res.header('Content-Type', 'text/csv');
-    res.attachment(`attendance_${year}_${month}.csv`);
-    res.send(csv);
+    // Ensure filename is safe and uses correct employee name/id if filtered
+    const filenameSuffix = userId ? `${userNameForHeader.replace(/\s/g, '_')}_${empIdForHeader || ''}` : 'AllEmployees';
+    res.attachment(`attendance_report_${filenameSuffix}_${year}_${month}.csv`);
+    return res.send(csvContent);
+
   } catch (error) {
     console.error('Export attendance error:', error);
-    res.status(500).json({ message: 'Server error exporting attendance.' });
+    res.status(500).json({ message: 'Server error exporting attendance data.' });
   }
 });
 
-app.post('/tasks/mark-forgotten-checkout-absent', async (req, res) => {
-  try {
-    if (req.headers['x-api-key'] !== process.env.CRON_API_KEY) {
-      return res.status(403).json({ message: 'Unauthorized' });
-    }
-    const yesterday = moment.tz('Asia/Kolkata').subtract(1, 'days').format('YYYY-MM-DD');
-    await pool.query(
-      `UPDATE attendance
-       SET status = 'Absent'
-       WHERE date = $1 AND check_out IS NULL AND status != 'Late'`,
-      [yesterday]
-    );
-    console.log(`Marked forgotten check-outs for ${yesterday} as absent.`);
-    res.status(200).json({ message: `Forgotten check-outs for ${yesterday} processed.` });
-  } catch (error) {
-    console.error('Error processing forgotten check-outs:', error);
-    res.status(500).json({ message: 'Server error processing forgotten check-outs.' });
-  }
-});
 
-app.get('/test-email', async (req, res) => {
-  try {
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: 'test@example.com',
-      subject: 'Test Email from HRMS',
-      text: 'This is a test email from your HRMS application.',
-    };
-    await transporter.sendMail(mailOptions);
-    console.log('Test email sent to test@example.com');
-    res.status(200).json({ message: 'Test email sent.' });
-  } catch (error) {
-    console.error('Test email error:', error);
-    res.status(500).json({ message: 'Failed to send test email.', error: error.message });
-  }
-});
-
+// Start the server
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, '0.0.0.0', () => console.log(`✅ Server running on 0.0.0.0:${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
