@@ -11,7 +11,7 @@ import './output.css'; // Assuming this is your Tailwind CSS output file
 const localizer = momentLocalizer(moment);
 const DnDCalendar = withDragAndDrop(Calendar);
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001'; // Updated for local development to port 3001
+const API_URL = process.env.REACT_APP_API_URL || 'https://hrms-backend-rhsc.onrender.com'; // Updated for local development to port 3001
 
 const axiosInstance = axios.create({
   baseURL: API_URL,
