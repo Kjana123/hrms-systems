@@ -8,27 +8,18 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Google Fonts - Inter -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <!-- React, ReactDOM -->
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <!-- Axios for API calls -->
-    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
-    <!-- Moment.js and Moment-timezone -->
+    <!-- Moment.js for date handling -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment-timezone/0.5.34/moment-timezone-with-data.min.js"></script>
-    <!-- React Big Calendar CSS -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/react-big-calendar/1.12.0/css/react-big-calendar.min.css" />
-    <!-- React Big Calendar JS -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-big-calendar/1.12.0/react-big-calendar.min.js"></script>
-    <!-- Removed: Drag and Drop Addon JS as it caused issues in this setup -->
-    <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/react-big-calendar/1.12.0/addons/dragAndDrop/react-big-calendar-addons-dnd.min.js"></script> -->
-    <!-- FileSaver for CSV export -->
-    <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+    <!-- Moment-timezone for timezone support -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment-timezone/0.5.43/moment-timezone-with-data.min.js"></script>
+    <!-- Axios for HTTP requests -->
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
     <!-- jwt-decode for token decoding -->
-    <script src="https://cdn.jsdelivr.net/npm/jwt-decode@4.0.0/build/jwt-decode.min.js"></script>
-    <!-- Babel (MUST be loaded AFTER all libraries it will transform/use) -->
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jwt-decode/3.1.2/jwt-decode.min.js"></script>
+    <!-- FileSaver.js for saving files (used by saveAs) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
 
+    <!-- Custom CSS -->
     <style>
         body {
             font-family: 'Inter', sans-serif;
@@ -226,57 +217,6 @@
         html.dark .scrollbar-thin::-webkit-scrollbar-track {
             background-color: #374151; /* Gray-700 */
         }
-
-        /* React Big Calendar specific overrides */
-        .rbc-calendar {
-            font-family: 'Inter', sans-serif;
-            border-radius: 0.75rem; /* rounded-xl */
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); /* shadow-md */
-            background-color: white;
-        }
-        html.dark .rbc-calendar {
-            background-color: #1f2937; /* dark:bg-gray-800 */
-            color: white;
-        }
-        html.dark .rbc-header {
-            color: #d1d5db; /* dark:text-gray-300 */
-        }
-        html.dark .rbc-toolbar button {
-            color: white;
-            background-color: #374151; /* dark:bg-gray-700 */
-        }
-        html.dark .rbc-toolbar button:hover {
-            background-color: #4b5563; /* dark:bg-gray-600 */
-        }
-        html.dark .rbc-day-bg {
-            background-color: #374151; /* dark:bg-gray-700 */
-        }
-        html.dark .rbc-row-segment .rbc-event {
-            background-color: #3b82f6; /* dark:bg-blue-500 */
-            color: white;
-        }
-        html.dark .rbc-today {
-            background-color: #4f46e5; /* dark:bg-indigo-600 */
-        }
-        html.dark .rbc-off-range-bg {
-            background-color: #1f2937; /* dark:bg-gray-800 */
-        }
-        html.dark .rbc-current-time-indicator {
-            background-color: #ef4444; /* dark:bg-red-500 */
-        }
-        /* Custom event colors for RBC based on status/type */
-        .rbc-event-attendance-present { background-color: #10B981; } /* Green-500 */
-        .rbc-event-attendance-late { background-color: #EF4444; } /* Red-500 */
-        .rbc-event-attendance-absent { background-color: #4B5563; } /* Gray-700 */
-        .rbc-event-attendance-checked-in { background-color: #3B82F6; } /* Blue-500 */
-
-        .rbc-event-leave-pending { background-color: #FBBF24; color: #333; } /* Yellow-400 */
-        .rbc-event-leave-approved { background-color: #059669; } /* Emerald-600 */
-        .rbc-event-leave-rejected { background-color: #B91C1C; } /* Red-700 */
-        .rbc-event-leave-cancellation_pending { background-color: #F59E0B; } /* Orange-500 */
-        .rbc-event-leave-cancelled { background-color: #6B7280; text-decoration: line-through; } /* Gray-500 */
-
-        .rbc-event-holiday { background-color: #8B5CF6; } /* Purple-500 */
     </style>
 </head>
 <body>
@@ -285,18 +225,9 @@
     <script type="text/babel">
         const { useState, useEffect, useCallback, useMemo } = React;
 
-        // Ensure all ReactBigCalendar components and functions are ready before use.
-        // We defer their assignment and the ReactDOM.render call to window.onload.
-        let RBCCalendar;
-        let RBCMomentLocalizer;
-        // Removed RBCWithDragAndDrop as it was causing issues
-        let localizer;
-        let CalendarComponent; // Renamed from DnDCalendar to reflect removal of D&D
-
-        // Use a fixed API URL for the HTML version
         const API_URL = 'https://hrms-backend-rhsc.onrender.com';
 
-        const axiosInstance = axios.create({
+        const axiosInstance = window.axios.create({ // Explicitly use window.axios
             baseURL: API_URL,
             withCredentials: true,
         });
@@ -350,11 +281,7 @@
         const AuthForms = ({ authView, setToken, setUser, setRole, darkMode, toggleDarkMode }) => {
             const [email, setEmail] = useState('');
             const [password, setPassword] = useState('');
-            const [newPassword, setNewPassword] = useState('');
-            const [name, setName] = useState('');
-            const [employeeId, setEmployeeId] = useState('');
-            const [roleInput, setRoleInput] = useState('employee');
-            const [shiftType, setShiftType] = useState('day');
+            const [newPassword, setNewPassword] = useState(''); // Only for reset password
 
             const handleLogin = async (e) => {
                 e.preventDefault();
@@ -371,26 +298,11 @@
                 }
             };
 
-            const handleRegister = async (e) => {
-                e.preventDefault();
-                try {
-                    const res = await axiosInstance.post('/register', { name, email, password, employee_id: employeeId, role: roleInput, shift_type: shiftType });
-                    alert('Registration successful! Please login.');
-                    setEmail('');
-                    setPassword('');
-                    setName('');
-                    setEmployeeId('');
-                    setRoleInput('employee');
-                    setShiftType('day');
-                } catch (err) {
-                    alert('Registration failed: ' + (err.response?.data?.message || err.message));
-                }
-            };
-
             const handleResetPassword = async (e) => {
                 e.preventDefault();
                 try {
-                    await axios.post(`${API_URL}/auth/reset-password`, { token: new URLSearchParams(window.location.search).get('token'), newPassword });
+                    // Use window.axios explicitly
+                    await window.axios.post(`${API_URL}/auth/reset-password`, { token: new URLSearchParams(window.location.search).get('token'), newPassword });
                     alert('Password reset successful! Please login.');
                     window.location.href = '/';
                 } catch (err) {
@@ -443,10 +355,7 @@
                                     </button>
                                 </form>
                                 <p className="mt-4 text-center text-sm text-gray-600 dark:text-gray-400">
-                                    Don't have an account?{' '}
-                                    <a href="/?view=register" className="text-blue-500 hover:text-blue-600 font-medium transition-colors duration-200">
-                                        Register here
-                                    </a>
+                                    Need an account? Please contact your administrator.
                                 </p>
                                 <p className="mt-2 text-center text-sm text-gray-600 dark:text-gray-400">
                                     Forgot your password?{' '}
@@ -455,93 +364,7 @@
                                     </a>
                                 </p>
                             </>
-                        ) : authView === 'register' ? (
-                            <>
-                                <h2 className="text-3xl font-bold mb-6 text-center text-gray-800 dark:text-white">Register New Account</h2>
-                                <form onSubmit={handleRegister} className="space-y-6">
-                                    <div>
-                                        <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Name</label>
-                                        <input
-                                            type="text"
-                                            value={name}
-                                            onChange={(e) => setName(e.target.value)}
-                                            className="w-full p-3 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white placeholder-gray-400 dark:placeholder-gray-500"
-                                            placeholder="Your Name"
-                                            required
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Email</label>
-                                        <input
-                                            type="email"
-                                            value={email}
-                                            onChange={(e) => setEmail(e.target.value)}
-                                            className="w-full p-3 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white placeholder-gray-400 dark:placeholder-gray-500"
-                                            placeholder="Your Email"
-                                            required
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Password</label>
-                                        <input
-                                            type="password"
-                                            value={password}
-                                            onChange={(e) => setPassword(e.target.value)}
-                                            className="w-full p-3 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white placeholder-gray-400 dark:placeholder-gray-500"
-                                            placeholder="Choose a strong password"
-                                            required
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Employee ID</label>
-                                        <input
-                                            type="text"
-                                            value={employeeId}
-                                            onChange={(e) => setEmployeeId(e.target.value)}
-                                            className="w-full p-3 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white placeholder-gray-400 dark:placeholder-gray-500"
-                                            placeholder="Unique Employee ID"
-                                            required
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Role</label>
-                                        <select
-                                            value={roleInput}
-                                            onChange={(e) => setRoleInput(e.target.value)}
-                                            className="w-full p-3 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                                            required
-                                        >
-                                            <option value="employee">Employee</option>
-                                            <option value="admin">Admin</option>
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Shift Type</label>
-                                        <select
-                                            value={shiftType}
-                                            onChange={(e) => setShiftType(e.target.value)}
-                                            className="w-full p-3 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                                            required
-                                        >
-                                            <option value="day">Day Shift</option>
-                                            <option value="evening">Evening Shift</option>
-                                        </select>
-                                    </div>
-                                    <button
-                                        type="submit"
-                                        className="w-full bg-green-500 text-white p-3 rounded-lg hover:bg-green-600 focus:ring-4 focus:ring-green-300 dark:focus:ring-green-700 transition-all duration-200 font-semibold"
-                                    >
-                                        Register
-                                    </button>
-                                </form>
-                                <p className="mt-4 text-center text-sm text-gray-600 dark:text-gray-400">
-                                    Already have an account?{' '}
-                                    <a href="/" className="text-blue-500 hover:text-blue-600 font-medium transition-colors duration-200">
-                                        Login here
-                                    </a>
-                                </p>
-                            </>
-                        ) : (
+                        ) : ( /* authView === 'resetPassword' */
                             <>
                                 <h2 className="text-3xl font-bold mb-6 text-center text-gray-800 dark:text-white">Reset Password</h2>
                                 <form onSubmit={handleResetPassword} className="space-y-6">
@@ -551,7 +374,7 @@
                                             type="password"
                                             value={newPassword}
                                             onChange={(e) => setNewPassword(e.target.value)}
-                                            className="w-full p-3 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white placeholder-gray-400 dark:placeholder-gray-500"
+                                            className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white placeholder-gray-400 dark:placeholder-gray-500"
                                             required
                                         />
                                     </div>
@@ -577,8 +400,8 @@
 
             useEffect(() => {
                 if (fromDate && toDate) {
-                    const start = moment(fromDate);
-                    const end = moment(toDate);
+                    const start = window.moment(fromDate); // Use window.moment
+                    const end = window.moment(toDate);     // Use window.moment
                     if (end.isSameOrAfter(start)) {
                         setTotalDays(end.diff(start, 'days') + 1);
                     } else {
@@ -648,14 +471,23 @@
             );
         };
 
-        const AdminPanel = ({ allLeaves, allCorrections, handleLeaveApproval, handleCorrectionApproval, allEmployeeAttendance, fetchAllEmployeeAttendance, monthlySummary, fetchAllEmployeeMonthlySummary, darkMode, handleExportAttendance }) => {
-            const [selectedDate, setSelectedDate] = useState(moment().tz('Asia/Kolkata').format('YYYY-MM-DD'));
-            const [selectedAnalyticsYear, setSelectedAnalyticsYear] = useState(moment().tz('Asia/Kolkata').year());
-            const [selectedAnalyticsMonth, setSelectedAnalyticsMonth] = useState(moment().tz('Asia/Kolkata').month() + 1);
-            const [exportYear, setExportYear] = useState(moment().tz('Asia/Kolkata').year());
-            const [exportMonth, setExportMonth] = useState(moment().tz('Asia/Kolkata').month() + 1);
+        const AdminPanel = ({ allLeaves, allCorrections, handleLeaveApproval, handleCorrectionApproval, allEmployeeAttendance, fetchAllEmployeeAttendance, monthlySummary, fetchAllEmployeeMonthlySummary, darkMode, handleExportAttendance, handleAddEmployee }) => {
+            const [selectedDate, setSelectedDate] = useState(window.moment().tz('Asia/Kolkata').format('YYYY-MM-DD')); // Use window.moment
+            const [selectedAnalyticsYear, setSelectedAnalyticsYear] = useState(window.moment().tz('Asia/Kolkata').year()); // Use window.moment
+            const [selectedAnalyticsMonth, setSelectedAnalyticsMonth] = useState(window.moment().tz('Asia/Kolkata').month() + 1); // Use window.moment
+            const [exportYear, setExportYear] = useState(window.moment().tz('Asia/Kolkata').year()); // Use window.moment
+            const [exportMonth, setExportMonth] = useState(window.moment().tz('Asia/Kolkata').month() + 1); // Use window.moment
             const [exportEmployeeId, setExportEmployeeId] = useState('');
             const [exportEmployeeName, setExportEmployeeName] = useState('');
+
+            // State for Add Employee form
+            const [newEmployeeName, setNewEmployeeName] = useState('');
+            const [newEmployeeEmail, setNewEmployeeEmail] = useState('');
+            const [newEmployeePassword, setNewEmployeePassword] = useState('');
+            const [newEmployeeId, setNewEmployeeId] = useState('');
+            const [newEmployeeRole, setNewEmployeeRole] = useState('employee');
+            const [newEmployeeShiftType, setNewEmployeeShiftType] = useState('day');
+
 
             useEffect(() => {
                 fetchAllEmployeeAttendance(selectedDate);
@@ -665,15 +497,68 @@
                 fetchAllEmployeeMonthlySummary(selectedAnalyticsYear, selectedAnalyticsMonth);
             }, [selectedAnalyticsYear, selectedAnalyticsMonth, fetchAllEmployeeMonthlySummary]);
 
+            const handleAddEmployeeSubmit = useCallback(async (e) => {
+                e.preventDefault();
+                handleAddEmployee(newEmployeeName, newEmployeeEmail, newEmployeePassword, newEmployeeId, newEmployeeRole, newEmployeeShiftType);
+                setNewEmployeeName('');
+                setNewEmployeeEmail('');
+                setNewEmployeePassword('');
+                setNewEmployeeId('');
+                setNewEmployeeRole('employee');
+                setNewEmployeeShiftType('day');
+            }, [newEmployeeName, newEmployeeEmail, newEmployeePassword, newEmployeeId, newEmployeeRole, newEmployeeShiftType, handleAddEmployee]);
+
+
             return (
                 <div>
+                    <h2 className="text-2xl font-semibold mb-6 text-gray-800 dark:text-gray-100">Add New Employee</h2>
+                    <form onSubmit={handleAddEmployeeSubmit} className="space-y-4 mb-8 p-6 bg-gray-50 dark:bg-gray-750 rounded-lg shadow-inner">
+                        <div>
+                            <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Name:</label>
+                            <input type="text" value={newEmployeeName} onChange={(e) => setNewEmployeeName(e.target.value)}
+                                className="w-full p-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white" required />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Email:</label>
+                            <input type="email" value={newEmployeeEmail} onChange={(e) => setNewEmployeeEmail(e.target.value)}
+                                className="w-full p-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white" required />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Temporary Password:</label>
+                            <input type="password" value={newEmployeePassword} onChange={(e) => setNewEmployeePassword(e.target.value)}
+                                className="w-full p-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white" required />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Employee ID:</label>
+                            <input type="text" value={newEmployeeId} onChange={(e) => setNewEmployeeId(e.target.value)}
+                                className="w-full p-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white" required />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Role:</label>
+                            <select value={newEmployeeRole} onChange={(e) => setNewEmployeeRole(e.target.value)}
+                                className="w-full p-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white" required>
+                                <option value="employee">Employee</option>
+                                <option value="admin">Admin</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Shift Type:</label>
+                            <select value={newEmployeeShiftType} onChange={(e) => setNewEmployeeShiftType(e.target.value)}
+                                className="w-full p-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white" required>
+                                <option value="day">Day</option>
+                                <option value="evening">Evening</option>
+                            </select>
+                        </div>
+                        <button type="submit" className="btn-primary w-full py-3">Add Employee</button>
+                    </form>
+
                     <h3 className="text-lg mb-3 text-gray-800 dark:text-gray-100">Manage Leaves</h3>
                     <ul className="list-disc pl-5 space-y-2 mb-6 max-h-48 overflow-y-auto scrollbar-thin">
                         {allLeaves.length > 0 ? (
                             allLeaves.map((l, i) => (
                                 <li key={i} className="py-1 flex justify-between items-center text-sm text-gray-700 dark:text-gray-300">
                                     <span>
-                                        <strong>{l.user_name} ({l.employee_id || 'N/A'})</strong> applied for leave: {moment(l.from_date).tz('Asia/Kolkata').format('YYYY-MM-DD')} to {moment(l.to_date).tz('Asia/Kolkata').format('YYYY-MM-DD')} - {l.reason}
+                                        <strong>{l.user_name} ({l.employee_id || 'N/A'})</strong> applied for leave: {window.moment(l.from_date).tz('Asia/Kolkata').format('YYYY-MM-DD')} to {window.moment(l.to_date).tz('Asia/Kolkata').format('YYYY-MM-DD')} - {l.reason}
                                         <span className={`status-badge status-badge-${l.status?.toLowerCase().replace(/\s/g, '-') || 'unknown'}`}>
                                             [{l.status}]
                                         </span>
@@ -723,7 +608,7 @@
                             allCorrections.map((c, i) => (
                                 <li key={i} className="py-1 flex justify-between items-center text-sm text-gray-700 dark:text-gray-300">
                                     <span>
-                                        <strong>{c.user_name} ({c.employee_id || 'N/A'})</strong> requested correction for: {moment(c.date).tz('Asia/Kolkata').format('YYYY-MM-DD')} - {c.reason}
+                                        <strong>{c.user_name} ({c.employee_id || 'N/A'})</strong> requested correction for: {window.moment(c.date).tz('Asia/Kolkata').format('YYYY-MM-DD')} - {c.reason}
                                         <span className={`status-badge status-badge-${c.status?.toLowerCase().replace(/\s/g, '-') || 'unknown'}`}>
                                             [{c.status}]
                                         </span>
@@ -786,8 +671,8 @@
                                                     {emp.status || 'N/A'}
                                                 </span>
                                             </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-gray-700 dark:text-gray-300">{emp.check_in ? moment(emp.check_in, 'HH:mm:ss').format('HH:mm') : 'N/A'}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-gray-700 dark:text-gray-300">{emp.check_out ? moment(emp.check_out, 'HH:mm:ss').format('HH:mm') : 'N/A'}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-gray-700 dark:text-gray-300">{emp.check_in ? window.moment(emp.check_in, 'HH:mm:ss').format('HH:mm') : 'N/A'}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-gray-700 dark:text-gray-300">{emp.check_out ? window.moment(emp.check_out, 'HH:mm:ss').format('HH:mm') : 'N/A'}</td>
                                         </tr>
                                     ))
                                 ) : (
@@ -903,6 +788,7 @@
                     <button
                         onClick={() => {
                             if (exportYear && exportMonth) {
+                                // Use window.saveAs from FileSaver.js CDN
                                 window.saveAs(new Blob([""], {type: "text/csv"}), `attendance_${exportYear}_${exportMonth}.csv`); // Placeholder
                                 handleExportAttendance(exportYear, exportMonth, exportEmployeeId, exportEmployeeName);
                             } else {
@@ -1047,9 +933,8 @@
             const [tab, setTab] = useState('attendance');
             const [attendance, setAttendance] = useState([]);
             const [leaves, setLeaves] = useState([]);
-            const [corrections, setCorrections] = useState([]);
-            const [calendarEvents, setCalendarEvents] = useState([]);
             const [holidays, setHolidays] = useState([]);
+            const [corrections, setCorrections] = useState([]);
             const [darkMode, setDarkMode] = useState(() => {
                 const savedMode = localStorage.getItem('darkMode');
                 if (savedMode) {
@@ -1076,6 +961,8 @@
                 holidays: 0
             });
             const [selectedMonthForTable, setSelectedMonthForTable] = useState(window.moment().tz('Asia/Kolkata').format('YYYY-MM'));
+            const [overallStats, setOverallStats] = useState({ totalEmployees: 'Loading...', totalAdmins: 'Loading...', pendingLeaves: 'Loading...', pendingCorrections: 'Loading...' });
+
 
             useEffect(() => {
                 if (darkMode) {
@@ -1098,7 +985,6 @@
                     setAttendance([]);
                     setLeaves([]);
                     setCorrections([]);
-                    setCalendarEvents([]);
                     setAllLeaves([]);
                     setAllCorrections([]);
                     setAllEmployeeAttendance([]);
@@ -1225,13 +1111,42 @@
                 }
             }, [user?.role, handleLogout]);
 
+            const fetchOverallStats = useCallback(async () => {
+                if (user?.role === 'admin') {
+                    try {
+                        // These endpoints are assumed to exist on the backend for analytics
+                        // You might need to implement these on your Node.js server
+                        const { data: employeesData } = await axiosInstance.get('/admin/employees/count'); // Example: { totalEmployees: X, totalAdmins: Y }
+                        const { data: pendingLeavesData } = await axiosInstance.get('/admin/leaves/pending-count'); // Example: { pendingLeaves: Z }
+                        const { data: pendingCorrectionsData } = await axiosInstance.get('/admin/corrections/pending-count'); // Example: { pendingCorrections: A }
+
+                        setOverallStats({
+                            totalEmployees: employeesData.total_employees || 0,
+                            totalAdmins: employeesData.total_admins || 0,
+                            pendingLeaves: pendingLeavesData.pending_leaves || 0,
+                            pendingCorrections: pendingCorrectionsData.pending_corrections || 0,
+                        });
+                    } catch (error) {
+                        console.error('Error fetching overall stats:', error);
+                        // Handle 404 specifically if endpoints don't exist yet gracefully
+                        if (error.response?.status === 404) {
+                            console.warn("Analytics endpoints not found. Overall stats will not be displayed.");
+                        } else if (error.response?.status === 401) {
+                            handleLogout();
+                        }
+                        setOverallStats({ totalEmployees: 'N/A', totalAdmins: 'N/A', pendingLeaves: 'N/A', pendingCorrections: 'N/A' });
+                    }
+                }
+            }, [user?.role, handleLogout]);
+
             const fetchAllAdminData = useCallback(async () => {
                 await Promise.all([
                     fetchAllAdminLeaves(),
                     fetchAllAdminCorrections(),
-                    fetchAllEmployeeMonthlySummary(window.moment().tz('Asia/Kolkata').year(), window.moment().tz('Asia/Kolkata').month() + 1)
+                    fetchAllEmployeeMonthlySummary(window.moment().tz('Asia/Kolkata').year(), window.moment().tz('Asia/Kolkata').month() + 1),
+                    fetchOverallStats() // Fetch overall stats for admin dashboard
                 ]);
-            }, [fetchAllAdminLeaves, fetchAllAdminCorrections, fetchAllEmployeeMonthlySummary]);
+            }, [fetchAllAdminLeaves, fetchAllAdminCorrections, fetchAllEmployeeMonthlySummary, fetchOverallStats]);
 
             const refreshUserData = useCallback(async () => {
                 if (isCheckingIn) {
@@ -1329,6 +1244,15 @@
                 const storedAccessToken = localStorage.getItem('accessToken');
                 if (storedUser && storedAccessToken) {
                     try {
+                        // Use window.jwt_decode
+                        const decodedToken = window.jwt_decode(storedAccessToken);
+                        // Make sure the token is still valid. If it's expired, force a refresh or logout.
+                        if (decodedToken.exp * 1000 < Date.now()) {
+                            console.warn('Access token expired on load, attempting refresh or logging out.');
+                            handleLogout(); // Try logging out to trigger refresh logic if needed
+                            return;
+                        }
+
                         const parsedUser = JSON.parse(storedUser);
                         console.log('App.jsx: Loaded user from localStorage (parsed):', parsedUser);
                         setUser(parsedUser);
@@ -1336,7 +1260,7 @@
                         setToken(storedAccessToken);
                         console.log('App.jsx: User state SET from localStorage:', parsedUser.name);
                     } catch (error) {
-                        console.error("App.jsx: Failed to parse user data from localStorage:", error);
+                        console.error("App.jsx: Failed to parse user data from localStorage or decode token:", error);
                         localStorage.removeItem('user');
                         localStorage.removeItem('accessToken');
                         setUser(null);
@@ -1349,7 +1273,7 @@
                     setRole(null);
                     setToken(null);
                 }
-            }, []);
+            }, []); // Empty dependency array to run only once on component mount
 
             useEffect(() => {
                 if (token && user) {
@@ -1364,7 +1288,6 @@
                     setAttendance([]);
                     setLeaves([]);
                     setCorrections([]);
-                    setCalendarEvents([]);
                     setAllLeaves([]);
                     setAllCorrections([]);
                     setAllEmployeeAttendance([]);
@@ -1394,54 +1317,6 @@
                 }, 60000);
                 return () => clearInterval(interval);
             }, [today, refreshUserData, user?.role, fetchAllEmployeeAttendance, fetchAllEmployeeMonthlySummary]);
-
-            useEffect(() => {
-                console.log("--- Generating Calendar Events for react-big-calendar ---");
-                const mapped = [
-                    ...attendance.map(a => {
-                        const startMoment = window.moment.tz(a.date, 'YYYY-MM-DD', 'Asia/Kolkata').startOf('day');
-                        const endMoment = startMoment.clone().add(1, 'day');
-                        console.log(`  Attendance Event - DB Date: ${a.date}, RBC Start (Date Obj): ${startMoment.toDate()}, RBC End (Date Obj): ${endMoment.toDate()}`);
-                        return {
-                            id: `attendance-${a.id || Math.random()}`,
-                            title: `Check-in: ${a.status ? a.status.toUpperCase() : 'UNKNOWN'} (${a.check_in ? window.moment(a.check_in, 'HH:mm:ss').tz('Asia/Kolkata').format('h:mm A') : 'N/A'} - ${a.check_out ? window.moment(a.check_out, 'HH:mm:ss').tz('Asia/Kolkata').format('h:mm A') : 'N/A'})`,
-                            start: startMoment.toDate(),
-                            end: endMoment.toDate(),
-                            allDay: true,
-                            resource: { type: 'attendance', status: a.status }
-                        };
-                    }),
-                    ...leaves.map(l => {
-                        const leaveStartMoment = window.moment.tz(l.from_date, 'YYYY-MM-DD', 'Asia/Kolkata').startOf('day');
-                        const leaveEndMoment = window.moment.tz(l.to_date, 'YYYY-MM-DD', 'Asia/Kolkata').startOf('day').add(1, 'days');
-                        console.log(`  Leave Event - DB From: ${l.from_date}, DB To: ${l.to_date}, RBC Start (Date Obj): ${leaveStartMoment.toDate()}, RBC End (Date Obj): ${leaveEndMoment.toDate()}, Status: ${l.status}`);
-
-                        return {
-                            id: `leave-${l.id || Math.random()}`,
-                            title: 'Leave',
-                            start: leaveStartMoment.toDate(),
-                            end: leaveEndMoment.toDate(),
-                            allDay: true,
-                            resource: { type: 'leave', status: l.status, leaveData: l }
-                        };
-                    }),
-                    ...holidays.map(h => {
-                        const holidayStartMoment = window.moment.tz(h.date, 'YYYY-MM-DD', 'Asia/Kolkata').startOf('day');
-                        const holidayEndMoment = holidayStartMoment.clone().add(1, 'day');
-                        console.log(`  Holiday Event - DB Date: ${h.date}, RBC Start (Date Obj): ${holidayStartMoment.toDate()}, RBC End (Date Obj): ${holidayEndMoment.toDate()}`);
-                        return {
-                            id: `holiday-${h.id || Math.random()}`,
-                            title: `Holiday: ${h.name}`,
-                            start: holidayStartMoment.toDate(),
-                            end: holidayEndMoment.toDate(),
-                            allDay: true,
-                            resource: { type: 'holiday' }
-                        };
-                    })
-                ];
-                setCalendarEvents(mapped);
-                console.log("--- Calendar Events Generation Complete ---");
-            }, [attendance, leaves, holidays]);
 
             const handleCheckIn = useCallback(async () => {
                 try {
@@ -1498,6 +1373,7 @@
                         params: params,
                         responseType: 'blob'
                     });
+                    // Use window.saveAs from FileSaver.js CDN
                     window.saveAs(new Blob([response.data], { type: 'text/csv' }), `attendance_${year}_${month}${filenameSuffix}.csv`);
                     alert('Attendance data exported successfully!');
                 } catch (err) {
@@ -1507,14 +1383,32 @@
                 }
             }, [handleLogout]);
 
+            const handleAddEmployee = useCallback(async (name, email, password, employee_id, role, shift_type) => {
+                try {
+                    // This endpoint needs to be secured on the backend to only allow 'admin' role to register users
+                    const res = await axiosInstance.post('/admin/register-employee', { name, email, password, employee_id, role, shift_type });
+                    alert(`Employee ${name} registered successfully!`);
+                    // Optionally refresh admin data to show new employee in lists if needed
+                    if (user?.role === 'admin') {
+                        fetchAllAdminData();
+                    }
+                } catch (err) {
+                    console.error('Employee registration failed:', err);
+                    alert('Employee registration failed: ' + (err.response?.data?.message || err.message));
+                    if (err.response?.status === 401) handleLogout();
+                }
+            }, [user?.role, fetchAllAdminData, handleLogout]);
+
+
             const refreshAdminData = useCallback(async () => {
                 await Promise.all([
                     fetchAllAdminLeaves(),
                     fetchAllAdminCorrections(),
                     fetchAllEmployeeAttendance(window.moment().tz('Asia/Kolkata').format('YYYY-MM-DD')),
-                    fetchAllEmployeeMonthlySummary(window.moment().tz('Asia/Kolkata').year(), window.moment().tz('Asia/Kolkata').month() + 1)
+                    fetchAllEmployeeMonthlySummary(window.moment().tz('Asia/Kolkata').year(), window.moment().tz('Asia/Kolkata').month() + 1),
+                    fetchOverallStats()
                 ]);
-            }, [fetchAllAdminLeaves, fetchAllAdminCorrections, fetchAllEmployeeAttendance, fetchAllEmployeeMonthlySummary]);
+            }, [fetchAllAdminLeaves, fetchAllAdminCorrections, fetchAllEmployeeAttendance, fetchAllEmployeeMonthlySummary, fetchOverallStats]);
 
             const handleCorrectionRequest = useCallback(async (date, reason) => {
                 try {
@@ -1615,84 +1509,19 @@
 
             const toggleDarkMode = useCallback(() => setDarkMode(prev => !prev), []);
 
-            const handleEventDrop = useCallback(async ({ event, start, end }) => {
-                // This function is no longer called by the calendar due to D&D removal
-                // Kept for reference or if D&D is re-introduced with a different setup.
-                if (event.resource.type === 'attendance' || event.resource.type === 'holiday') {
-                    alert('Cannot modify attendance or holiday events.');
-                    return;
-                }
-                if (event.resource.type === 'leave' && event.resource.status !== 'approved') {
-                    alert('Only approved leaves can be modified via drag and drop.');
-                    return;
-                }
-
-                try {
-                    const actualEndDateMoment = window.moment(end).subtract(1, 'day');
-
-                    if (window.moment(start).isAfter(actualEndDateMoment)) {
-                        alert('Start date cannot be after end date.');
-                        await refreshUserData();
-                        return;
-                    }
-
-                    const newFromDate = window.moment(start).format('YYYY-MM-DD');
-                    const newToDate = actualEndDateMoment.format('YYYY-MM-DD');
-
-                    const updatedEvent = {
-                        ...event,
-                        start: window.moment.tz(newFromDate, 'YYYY-MM-DD', 'Asia/Kolkata').startOf('day').toDate(),
-                        end: window.moment.tz(newToDate, 'YYYY-MM-DD', 'Asia/Kolkata').add(1, 'day').startOf('day').toDate(),
-                    };
-
-                    await axiosInstance.put(`/leaves/${event.resource.leaveData.id}`, {
-                        from_date: newFromDate,
-                        to_date: newToDate,
-                    });
-                    setCalendarEvents(prev =>
-                        prev.map(evt => (evt.id === event.id ? updatedEvent : evt))
-                    );
-                    alert('Leave event updated successfully!');
-                    await refreshUserData();
-                } catch (err) {
-                    console.error('Event update failed:', err);
-                    alert('Failed to update event: ' + (err.response?.data?.message || err.message));
-                    if (err.response?.status === 401) handleLogout();
-                    await refreshUserData();
-                }
-            }, [refreshUserData, handleLogout]);
-
-            const handleSelectSlot = useCallback(async ({ start }) => {
-                if (user?.role !== 'admin') {
-                    alert('Only admins can add leaves directly from the calendar.');
-                    return;
-                }
-                const reason = prompt('Enter leave reason:');
-                if (reason) {
-                    await handleApplyLeave(
-                        window.moment(start).tz('Asia/Kolkata').format('YYYY-MM-DD'),
-                        window.moment(start).tz('Asia/Kolkata').format('YYYY-MM-DD'),
-                        reason
-                    );
-                }
-            }, [user?.role, handleApplyLeave]);
-
             const urlParams = new URLSearchParams(window.location.search);
             const resetToken = urlParams.get('token');
-            const authView = urlParams.get('view') === 'resetPassword' && resetToken
+            // Modified AuthForms to remove register option for employees
+            const authView = resetToken
                 ? 'resetPassword'
-                : (urlParams.get('view') === 'register' ? 'register' : 'login');
+                : 'login';
 
             const userMonthlyAttendance = useMemo(() => {
                 const data = [];
                 const [year, month] = selectedMonthForTable.split('-').map(Number);
-                const startOfMonth = window.moment.tz([year, month - 1, 1], 'Asia/Kolkata').startOf('month');
-                const endOfMonth = window.moment.tz([year, month - 1, 1], 'Asia/Kolkata').endOf('month');
-                // Ensure expectedCheckinTime is always based on 'Asia/Kolkata' timezone
-                const expectedCheckinTime = user?.shift_type === 'evening'
-                    ? window.moment().tz('Asia/Kolkata').hour(21).minute(0).second(0) // 9 PM IST
-                    : window.moment().tz('Asia/Kolkata').hour(9).minute(0).second(0);   // 9 AM IST
-
+                const startOfMonth = window.moment().tz('Asia/Kolkata').year(year).month(month - 1).startOf('month');
+                const endOfMonth = window.moment().tz('Asia/Kolkata').year(year).month(month - 1).endOf('month');
+                
                 let currentDay = startOfMonth.clone();
                 while (currentDay.isSameOrBefore(endOfMonth)) {
                     const dateFormatted = currentDay.format('YYYY-MM-DD');
@@ -1700,7 +1529,7 @@
                     let status = 'Absent';
                     let checkIn = 'N/A';
                     let checkOut = 'N/A';
-                    let lateTime = '0m';
+                    let lateTime = '0h 0m'; // Initialize as hours and minutes
                     let workingHours = '0h 0m';
                     let extraHours = '0h 0m';
                     let rowClass = '';
@@ -1730,11 +1559,19 @@
                         rowClass = attendanceRecord.status === 'late' ? 'bg-red-100 dark:bg-red-800' : (status === 'present' ? 'bg-green-100 dark:bg-green-800' : rowClass);
 
                         if (attendanceRecord.check_in) {
-                            const actualCheckIn = window.moment(attendanceRecord.check_in, 'HH:mm:ss');
+                            // Determine expected check-in time based on shift type
+                            const expectedCheckinTime = user?.shift_type === 'evening'
+                                ? window.moment(dateFormatted).tz('Asia/Kolkata').hour(21).minute(0).second(0) // 9 PM IST
+                                : window.moment(dateFormatted).tz('Asia/Kolkata').hour(9).minute(0).second(0);   // 9 AM IST
+
+                            const actualCheckIn = window.moment(attendanceRecord.check_in, 'HH:mm:ss').tz('Asia/Kolkata').date(currentDay.date()).month(currentDay.month()).year(currentDay.year());
+
                             if (actualCheckIn.isAfter(expectedCheckinTime)) {
                                 const diffMinutes = actualCheckIn.diff(expectedCheckinTime, 'minutes');
                                 if (diffMinutes > 0) {
-                                    lateTime = `${diffMinutes}m`;
+                                    const lateHours = Math.floor(diffMinutes / 60);
+                                    const lateMins = diffMinutes % 60;
+                                    lateTime = `${lateHours}h ${lateMins}m`;
                                 }
                             }
                         }
@@ -1744,13 +1581,15 @@
                             const checkOutMoment = window.moment(attendanceRecord.check_out, 'HH:mm:ss');
 
                             let totalDuration = window.moment.duration(checkOutMoment.diff(checkInMoment));
-                            if (checkInMoment.isAfter(checkOutMoment) && user?.shift_type === 'evening') {
+                            // Handle overnight shifts for evening shift
+                            if (user?.shift_type === 'evening' && checkInMoment.isAfter(checkOutMoment)) {
                                 totalDuration = window.moment.duration(checkOutMoment.add(1, 'day').diff(checkInMoment));
                             } else if (checkInMoment.isAfter(checkOutMoment)) {
+                                // If check-in is after check-out for day shift, something is wrong, assume 0 working hours
                                 totalDuration = window.moment.duration(0);
                             }
 
-                            const standardWorkingHours = 8 * 60;
+                            const standardWorkingHours = 8 * 60; // 8 hours in minutes
                             let totalMinutes = totalDuration.asMinutes();
                             let calculatedWorkingHours = Math.floor(totalMinutes / 60);
                             let calculatedWorkingMinutes = Math.round(totalMinutes % 60);
@@ -1783,6 +1622,10 @@
 
 
             if (!token) {
+                // If the URL has /?view=register, redirect to login as self-registration is disabled
+                if (window.location.search.includes('view=register')) {
+                    window.location.replace('/');
+                }
                 return <AuthForms authView={authView} setToken={setToken} setUser={setUser} setRole={setRole} darkMode={darkMode} toggleDarkMode={toggleDarkMode} />;
             }
 
@@ -1834,12 +1677,7 @@
                             >
                                 Leaves
                             </button>
-                            <button
-                                onClick={() => setTab('calendar')}
-                                className={`tabs ${tab === 'calendar' ? 'active' : ''}`}
-                            >
-                                Calendar
-                            </button>
+                            {/* Calendar Tab Removed */}
                             <button
                                 onClick={() => setTab('analytics')}
                                 className={`tabs ${tab === 'analytics' ? 'active' : ''}`}
@@ -2010,68 +1848,62 @@
                             </div>
                         )}
 
-                        {tab === 'calendar' && (
-                            <div className="card text-left">
-                                <h2 className="text-2xl font-semibold mb-6 text-gray-800 dark:text-gray-100">Interactive Calendar</h2>
-                                {localizer && CalendarComponent ? (
-                                    <CalendarComponent // Changed from DnDCalendar
-                                        localizer={localizer}
-                                        events={calendarEvents}
-                                        selectable
-                                        onSelectSlot={handleSelectSlot}
-                                        startAccessor="start"
-                                        endAccessor="end"
-                                        className="rbc-calendar bg-gray-50 dark:bg-gray-700 p-4 rounded-lg shadow-inner"
-                                        defaultView="month"
-                                        views={['month', 'week', 'day']}
-                                        eventPropGetter={(event) => {
-                                            let className = '';
-                                            if (event.resource) {
-                                                if (event.resource.type === 'attendance') {
-                                                    className = `rbc-event-attendance-${event.resource.status?.toLowerCase().replace(/\s/g, '-') || 'unknown'}`;
-                                                } else if (event.resource.type === 'leave') {
-                                                    className = `rbc-event-leave-${event.resource.status?.toLowerCase().replace(/\s/g, '-') || 'unknown'}`;
-                                                } else if (event.resource.type === 'holiday') {
-                                                    className = 'rbc-event-holiday';
-                                                }
-                                            }
-                                            return { className };
-                                        }}
-                                        // Removed onEventDrop and resizable as D&D is removed
-                                        // onEventDrop={handleEventDrop}
-                                        // resizable
-                                        style={{ height: 600 }}
-                                    />
-                                ) : (
-                                    <p className="text-red-500 text-center">Calendar components not loaded. Please ensure CDN scripts are correctly loaded.</p>
-                                )}
-                            </div>
-                        )}
-
                         {tab === 'analytics' && (
                             <div className="card text-left">
                                 <h2 className="text-2xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Monthly Attendance Analytics</h2>
                                 <p className="mb-6 text-lg font-medium text-gray-700 dark:text-gray-300">For {window.moment(selectedMonthForTable).tz('Asia/Kolkata').format('MMMMEEEE')}</p>
-                                <ul className="list-disc pl-5 space-y-3 text-lg text-gray-700 dark:text-gray-300">
-                                    <li className="flex justify-between items-center py-1">
-                                        <span>Days Present:</span> <span className="font-semibold text-green-600 dark:text-green-400">{analytics.presentDays}</span>
-                                    </li>
-                                    <li className="flex justify-between items-center py-1">
-                                        <span>Weekly Offs (Sat/Sun, no check-in):</span> <span className="font-semibold text-blue-600 dark:text-blue-400">{analytics.weeklyOffs}</span>
-                                    </li>
-                                    <li className="flex justify-between items-center py-1">
-                                        <span>Leaves Taken:</span> <span className="font-semibold text-yellow-600 dark:text-yellow-400">{analytics.leavesTaken}</span>
-                                    </li>
-                                    <li className="flex justify-between items-center py-1">
-                                        <span>Holidays:</span> <span className="font-semibold text-purple-600 dark:text-purple-400">{analytics.holidays}</span>
-                                    </li>
-                                </ul>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                                    <div className="bg-green-100 dark:bg-green-900/40 p-4 rounded-lg shadow-md flex flex-col items-center">
+                                        <span className="text-3xl font-bold text-green-700 dark:text-green-300">{analytics.presentDays}</span>
+                                        <span className="text-sm mt-1 text-gray-700 dark:text-gray-300">Days Present</span>
+                                    </div>
+                                    <div className="bg-blue-100 dark:bg-blue-900/40 p-4 rounded-lg shadow-md flex flex-col items-center">
+                                        <span className="text-3xl font-bold text-blue-700 dark:text-blue-300">{analytics.weeklyOffs}</span>
+                                        <span className="text-sm mt-1 text-gray-700 dark:text-gray-300">Weekly Offs</span>
+                                    </div>
+                                    <div className="bg-yellow-100 dark:bg-yellow-900/40 p-4 rounded-lg shadow-md flex flex-col items-center">
+                                        <span className="text-3xl font-bold text-yellow-700 dark:text-yellow-300">{analytics.leavesTaken}</span>
+                                        <span className="text-sm mt-1 text-gray-700 dark:text-gray-300">Leaves Taken</span>
+                                    </div>
+                                    <div className="bg-purple-100 dark:bg-purple-900/40 p-4 rounded-lg shadow-md flex flex-col items-center">
+                                        <span className="text-3xl font-bold text-purple-700 dark:text-purple-300">{analytics.holidays}</span>
+                                        <span className="text-sm mt-1 text-gray-700 dark:text-gray-300">Holidays</span>
+                                    </div>
+                                </div>
                             </div>
                         )}
 
                         {role === 'admin' && tab === 'admin' && (
                             <div className="card text-left">
-                                <h2 className="text-2xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Admin Panel</h2>
+                                <h2 className="text-2xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Admin Panel Overview</h2>
+
+                                {/* Overall HRMS Statistics */}
+                                <div className="mb-8 p-6 bg-blue-50 dark:bg-blue-900/40 rounded-lg shadow-inner">
+                                    <h3 className="text-xl font-semibold mb-4 text-blue-800 dark:text-blue-200">Overall HRMS Statistics</h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-gray-800 dark:text-gray-200">
+                                        <div className="bg-white dark:bg-gray-700 p-4 rounded-lg shadow-md flex flex-col items-center">
+                                            <span className="text-4xl font-bold text-blue-600 dark:text-blue-400">{overallStats.totalEmployees}</span>
+                                            <span className="text-sm mt-1">Total Employees</span>
+                                        </div>
+                                        <div className="bg-white dark:bg-gray-700 p-4 rounded-lg shadow-md flex flex-col items-center">
+                                            <span className="text-4xl font-bold text-green-600 dark:text-green-400">{overallStats.totalAdmins}</span>
+                                            <span className="text-sm mt-1">Total Admins</span>
+                                        </div>
+                                        <div className="bg-white dark:bg-gray-700 p-4 rounded-lg shadow-md flex flex-col items-center">
+                                            <span className="text-4xl font-bold text-yellow-600 dark:text-yellow-400">{overallStats.pendingLeaves}</span>
+                                            <span className="text-sm mt-1">Pending Leaves</span>
+                                        </div>
+                                        <div className="bg-white dark:bg-gray-700 p-4 rounded-lg shadow-md flex flex-col items-center">
+                                            <span className="text-4xl font-bold text-red-600 dark:text-red-400">{overallStats.pendingCorrections}</span>
+                                            <span className="text-sm mt-1">Pending Corrections</span>
+                                        </div>
+                                    </div>
+                                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-4 text-center">
+                                        (Note: Overall statistics require backend API endpoints for `/admin/employees/count`, `/admin/leaves/pending-count`, and `/admin/corrections/pending-count` to be fully functional.)
+                                    </p>
+                                </div>
+
+
                                 <AdminPanel
                                     allLeaves={allLeaves}
                                     allCorrections={allCorrections}
@@ -2083,6 +1915,7 @@
                                     fetchAllEmployeeMonthlySummary={fetchAllEmployeeMonthlySummary}
                                     darkMode={darkMode}
                                     handleExportAttendance={handleExportAttendance}
+                                    handleAddEmployee={handleAddEmployee}
                                 />
                             </div>
                         )}
@@ -2121,32 +1954,26 @@
 
         // Defer rendering until window is fully loaded to ensure all CDNs are ready
         window.onload = function() {
-            // Assign global objects once all scripts are loaded
-            RBCCalendar = window.ReactBigCalendar.Calendar;
-            RBCMomentLocalizer = window.ReactBigCalendar.momentLocalizer;
-
-            // Removed RBCWithDragAndDrop as it was causing issues.
-            // If drag-and-drop functionality is critical, a proper React build environment
-            // with npm/yarn and module imports would be necessary.
-
-            // Check if essential components are loaded before proceeding
-            if (!RBCCalendar || !RBCMomentLocalizer) {
-                console.error("Error: Required React Big Calendar components (Calendar or MomentLocalizer) could not be found. Please check CDN links and network status.");
-                // Display a user-friendly error message on the page
-                const rootDiv = document.getElementById('root');
-                if (rootDiv) {
-                    rootDiv.innerHTML = '<div style="display: flex; justify-content: center; align-items: center; min-height: 100vh; font-family: \'Inter\', sans-serif; background-color: #f3f4f6; color: #ef4444; font-size: 1.25rem; text-align: center; padding: 20px;">' +
-                                        'Failed to load the calendar. Some essential components are missing. <br/> Please ensure your internet connection is stable and try again.' +
-                                        '</div>';
+            setTimeout(() => { // Added a small timeout to ensure all CDNs are fully loaded
+                // Assign global objects once all scripts are loaded
+                if (window.moment && typeof window.moment.tz === 'function') {
+                    window.moment.tz.setDefault('Asia/Kolkata'); // Set default timezone for moment
+                } else {
+                    console.error("Moment.js or Moment-timezone not fully loaded or configured. Please check CDN links and network status.");
                 }
-                return; // Stop further execution
-            }
 
-            localizer = RBCMomentLocalizer(window.moment);
-            CalendarComponent = RBCCalendar; // Use the standard Calendar component
+                // Ensure window.jwt_decode is available as expected
+                if (typeof window.jwt_decode === 'undefined') {
+                     console.error("Error: jwt-decode CDN not loaded. Please check CDN link for jwt-decode.");
+                }
+                // Ensure window.saveAs is available as expected
+                if (typeof window.saveAs === 'undefined') {
+                    console.error("Error: FileSaver.js CDN not loaded. Please check CDN link for FileSaver.js.");
+                }
 
-            // Render the App component into the root div
-            ReactDOM.render(<App />, document.getElementById('root'));
+
+                ReactDOM.render(<App />, document.getElementById('root'));
+            }, 100); // Small delay
         };
     </script>
 </body>
