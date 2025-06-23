@@ -16,6 +16,17 @@ CREATE TABLE IF NOT EXISTS users (
   role TEXT CHECK(role IN ('employee', 'admin'))
 );
 
+CREATE TABLE IF NOT EXISTS corrections (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id),
+  user_name TEXT, // Added user_name column
+  employee_id TEXT, // Added employee_id column
+  date DATE,
+  reason TEXT,
+  status TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS attendance (
   id SERIAL PRIMARY KEY,
   user_id INTEGER REFERENCES users(id),
@@ -24,15 +35,6 @@ CREATE TABLE IF NOT EXISTS attendance (
   check_out TIMESTAMP,
   status TEXT,
   UNIQUE (user_id, date)
-);
-
-CREATE TABLE IF NOT EXISTS corrections (
-  id SERIAL PRIMARY KEY,
-  user_id INTEGER REFERENCES users(id),
-  date DATE,
-  reason TEXT,
-  status TEXT,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS leaves (
@@ -55,4 +57,3 @@ CREATE TABLE IF NOT EXISTS leaves (
     process.exit(1);
   }
 })();
-
