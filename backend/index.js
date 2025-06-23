@@ -42,7 +42,7 @@ const authenticate = async (req, res, next) => {
     }
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     console.log('JWT decoded:', { id: decoded.id, role: decoded.role });
-    req.user = decoded; // Attach decoded user info to the request
+    req.user = decoded;
     next();
   } catch (error) {
     console.error('Token verification failed:', error.message);
@@ -304,7 +304,7 @@ app.post('/attendance/correction-request', authenticate, async (req, res) => {
 
     // Check if a correction request for this date already exists and is pending
     const existingRequest = await pool.query(
-      'SELECT * FROM corrections WHERE user_id = $1 AND date = $2 AND status = $3', // Changed to 'corrections'
+      'SELECT * FROM corrections WHERE user_id = $1 AND date = $2 AND status = $3', 
       [userId, date, 'pending']
     );
 
@@ -328,7 +328,7 @@ app.get('/attendance/corrections/user', authenticate, async (req, res) => {
   try {
     const userId = req.user.id;
     const { rows } = await pool.query(
-      'SELECT * FROM corrections WHERE user_id = $1 ORDER BY date DESC, status ASC', // Changed to 'corrections'
+      'SELECT * FROM corrections WHERE user_id = $1 ORDER BY date DESC, status ASC',
       [userId]
     );
     res.json(rows);
@@ -488,7 +488,7 @@ app.get('/admin/attendance/corrections', authenticate, authorizeAdmin, async (re
   try {
     const { rows } = await pool.query(`
       SELECT ac.*, u.name as user_name, u.employee_id
-      FROM corrections ac // Changed to 'corrections'
+      FROM corrections ac
       JOIN users u ON ac.user_id = u.id
       ORDER BY ac.date DESC, ac.status ASC
     `);
@@ -499,18 +499,18 @@ app.get('/admin/attendance/corrections', authenticate, authorizeAdmin, async (re
   }
 });
 
+
 // Admin: Review attendance correction (approve/reject)
 app.post('/admin/attendance/correction-review', authenticate, authorizeAdmin, async (req, res) => {
   try {
     const { id, status } = req.body;
-    const adminName = req.user.name; // Get admin's name from token
+    const adminName = req.user.name; 
 
     if (!id || !['approved', 'rejected'].includes(status)) {
       return res.status(400).json({ message: 'Invalid correction ID or status.' });
     }
 
-    const { rows } = await pool.query('SELECT * FROM corrections WHERE id=$1', [id]); // Changed to 'corrections'
-    if (rows.length === 0) {
+    const { rows } = await pool.query('SELECT * FROM corrections WHERE id=$1', [id]);     if (rows.length === 0) {
       return res.status(404).json({ message: 'Correction request not found.' });
     }
 
@@ -520,7 +520,7 @@ app.post('/admin/attendance/correction-review', authenticate, authorizeAdmin, as
     }
 
     await pool.query(
-      'UPDATE corrections SET status=$1, assigned_admin_name=$2 WHERE id=$3', // Changed to 'corrections'
+      'UPDATE corrections SET status=$1, assigned_admin_name=$2 WHERE id=$3',
       [status, adminName, id]
     );
 
