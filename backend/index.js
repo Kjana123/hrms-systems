@@ -111,9 +111,10 @@ app.post('/register', async (req, res) => {
   }
 });
 
-// User Login
+// ✅ Login Route
 app.post('/auth/login', async (req, res) => {
   const { email, password } = req.body;
+
   try {
     const userResult = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
     const user = userResult.rows[0];
@@ -127,88 +128,110 @@ app.post('/auth/login', async (req, res) => {
       return res.status(400).json({ message: 'Invalid credentials.' });
     }
 
-    // Generate JWT and refresh token
-    const accessToken = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '15m' }); // Short-lived
-    const refreshToken = jwt.sign({ id: user.id }, process.env.REFRESH_TOKEN_SECRET, { expiresIn: '7d' }); // Long-lived
+    const accessToken = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '15m' });
+    const refreshToken = jwt.sign({ id: user.id }, process.env.REFRESH_TOKEN_SECRET, { expiresIn: '7d' });
 
-    // Store refresh token in DB
     await pool.query('UPDATE users SET refresh_token = $1 WHERE id = $2', [refreshToken, user.id]);
 
-    // Send refresh token as httpOnly cookie
-    res.cookie('refreshToken', refreshToken, {
+    res.cookie('refresh_token', refreshToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production', // Use secure in production (HTTPS)
-      sameSite: 'Lax', // 'Strict' or 'Lax' recommended for security
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+      secure: true,
+      sameSite: 'None',
+      maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
     res.json({
       message: 'Logged in successfully',
       accessToken,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role, employee_id: user.employee_id, shift_type: user.shift_type }
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        employee_id: user.employee_id,
+        shift_type: user.shift_type
+      }
     });
+
   } catch (err) {
     console.error('Error during login:', err);
     res.status(500).json({ message: 'Server error during login.' });
   }
 });
 
+
 // Token Refresh
+// ✅ Refresh Route
 app.post('/auth/refresh', async (req, res) => {
-    const refreshToken = req.cookies.refreshToken;
-    if (!refreshToken) {
-        console.warn('No refresh token provided in cookies.');
-        return res.status(401).json({ message: 'No refresh token provided.' });
+  const refreshToken = req.cookies.refresh_token;
+  if (!refreshToken) {
+    return res.status(401).json({ message: 'No refresh token provided.' });
+  }
+
+  try {
+    const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
+    const userResult = await pool.query('SELECT * FROM users WHERE id = $1 AND refresh_token = $2', [decoded.id, refreshToken]);
+    const user = userResult.rows[0];
+
+    if (!user) {
+      return res.status(403).json({ message: 'Invalid refresh token.' });
     }
 
-    try {
-        const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
+    const newAccessToken = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '15m' });
+    const newRefreshToken = jwt.sign({ id: user.id }, process.env.REFRESH_TOKEN_SECRET, { expiresIn: '7d' });
 
-        const userResult = await pool.query('SELECT * FROM users WHERE id = $1 AND refresh_token = $2', [decoded.id, refreshToken]);
-        const user = userResult.rows[0];
+    await pool.query('UPDATE users SET refresh_token = $1 WHERE id = $2', [newRefreshToken, user.id]);
 
-        if (!user) {
-            console.warn('Refresh token not found or invalid for user ID:', decoded.id);
-            return res.status(403).json({ message: 'Invalid refresh token.' });
-        }
+    res.cookie('refresh_token', newRefreshToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'None',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
 
-        const newAccessToken = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '15m' });
-        const newRefreshToken = jwt.sign({ id: user.id }, process.env.REFRESH_TOKEN_SECRET, { expiresIn: '7d' });
+    res.json({
+      accessToken: newAccessToken,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        employee_id: user.employee_id,
+        shift_type: user.shift_type
+      }
+    });
 
-        await pool.query('UPDATE users SET refresh_token = $1 WHERE id = $2', [newRefreshToken, user.id]);
-
-        res.cookie('refreshToken', newRefreshToken, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'Lax',
-            maxAge: 7 * 24 * 60 * 60 * 1000
-        });
-
-        res.json({
-            accessToken: newAccessToken,
-            user: { id: user.id, name: user.name, email: user.email, role: user.role, employee_id: user.employee_id, shift_type: user.shift_type }
-        });
-    } catch (err) {
-        console.error('Error refreshing token:', err.message);
-        // Clear cookie if token is invalid or expired
-        res.clearCookie('refreshToken', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'Lax' });
-        return res.status(403).json({ message: 'Failed to refresh token: ' + err.message });
-    }
+  } catch (err) {
+    console.error('Refresh error:', err);
+    res.clearCookie('refresh_token', {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'None'
+    });
+    res.status(403).json({ message: 'Failed to refresh token: ' + err.message });
+  }
 });
 
 
+
 // User Logout
+// ✅ Logout Route
 app.post('/auth/logout', authenticate, async (req, res) => {
-    try {
-        // Clear refresh token from DB
-        await pool.query('UPDATE users SET refresh_token = NULL WHERE id = $1', [req.user.id]);
-        // Clear httpOnly cookie
-        res.clearCookie('refreshToken', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'Lax' });
-        res.status(200).json({ message: 'Logged out successfully.' });
-    } catch (err) {
-        console.error('Error during logout:', err);
-        res.status(500).json({ message: 'Server error during logout.' });
-    }
+  try {
+    await pool.query('UPDATE users SET refresh_token = NULL WHERE id = $1', [req.user.id]);
+
+    res.clearCookie('refresh_token', {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'None'
+    });
+
+    res.status(200).json({ message: 'Logged out successfully.' });
+
+  } catch (err) {
+    console.error('Error during logout:', err);
+    res.status(500).json({ message: 'Server error during logout.' });
+  }
 });
 
 // Change Password
