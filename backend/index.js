@@ -6,14 +6,41 @@ const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const moment = require('moment-timezone');
 const pool = require('./db');
-// const adminController = require('./adminController'); // Assuming this exists for other admin routes - REMOVED this line
 const cors = require('cors'); // Import cors
+const cookieParser = require('cookie-parser'); // Import cookie-parser
 
 const app = express();
 app.use(express.json());
+app.use(cookieParser()); // Use cookie-parser middleware
 app.use(cors({ // Enable CORS for all routes
-  origin: ['http://localhost:3000', 'https://attendance.unitedsolutionsplus.in'], // Replace with your frontend domain in production
-  credentials: true,
+  // Dynamically set origin based on environment and request origin
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like file:// for local development or Postman)
+    if (!origin) return callback(null, true);
+
+    const allowedOrigins = [
+      'http://localhost:3000',
+      'https://attendance.unitedsolutionsplus.in',
+      'http://127.0.0.1:8081' // Added this origin for local http-server
+    ];
+
+    // In development, also specifically allow 'null' origin for local file system access
+    // and other potential local development origins.
+    // Ensure this logic is only for development to prevent security risks in production.
+    if (process.env.NODE_ENV !== 'production') {
+        // Explicitly allow 'null' origin when running from file://
+        if (origin === 'null') {
+            return callback(null, true);
+        }
+    }
+
+    if (allowedOrigins.indexOf(origin) === -1) {
+      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+      return callback(new Error(msg), false);
+    }
+    return callback(null, true);
+  },
+  credentials: true, // Important for sending cookies and authorization headers
 }));
 
 // Configure nodemailer transporter
@@ -40,43 +67,45 @@ const authenticate = async (req, res, next) => {
         return res.status(500).json({ message: 'Server configuration error: JWT secret missing.' });
     }
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    console.log('JWT decoded:', { id: decoded.id, role: decoded.role });
-    req.user = decoded; // Attach decoded user info to the request
+    req.user = decoded;
     next();
-  } catch (error) {
-    console.error('Token verification failed:', error.message);
-    res.status(401).json({ message: 'Invalid or expired token.' });
+  } catch (err) {
+    console.error('JWT verification failed:', err.message);
+    if (err.name === 'TokenExpiredError') {
+      return res.status(401).json({ message: 'Token expired.' });
+    }
+    return res.status(403).json({ message: 'Invalid token.' });
   }
 };
 
-// Middleware to check if user is an admin
+// Middleware to check if user is admin
 const authorizeAdmin = (req, res, next) => {
   if (req.user && req.user.role === 'admin') {
     next();
   } else {
-    res.status(403).json({ message: 'Access denied. Admin rights required.' });
+    res.status(403).json({ message: 'Access denied. Admin role required.' });
   }
 };
 
+// --- Auth Routes ---
+
 // User Registration
 app.post('/register', async (req, res) => {
+  const { name, email, password, employee_id, role, shift_type } = req.body;
   try {
-    const { name, email, password, employee_id, role, shift_type } = req.body;
-
-    if (!name || !email || !password || !employee_id || !role || !shift_type) {
-      return res.status(400).json({ message: 'All fields are required.' });
-    }
-
     const hashedPassword = await bcrypt.hash(password, 10);
     const result = await pool.query(
-      'INSERT INTO users (name, email, password_hash, employee_id, role, shift_type) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, name, email, employee_id, role, shift_type',
-      [name, email, hashedPassword, employee_id, role, shift_type]
+      'INSERT INTO users (name, email, password, employee_id, role, shift_type) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
+      [name, email, hashedPassword, employee_id, role || 'employee', shift_type || 'day']
     );
-    res.status(201).json({ message: 'User registered successfully', user: result.rows[0] });
-  } catch (error) {
-    console.error('Registration error:', error);
-    if (error.code === '23505') { // Unique violation code for PostgreSQL
-      return res.status(409).json({ message: 'Employee ID or Email already exists.' });
+    res.status(201).json({ message: 'User registered successfully', userId: result.rows[0].id });
+  } catch (err) {
+    console.error('Error during registration:', err);
+    if (err.code === '23505' && err.constraint === 'users_email_key') {
+      return res.status(400).json({ message: 'Email already registered.' });
+    }
+    if (err.code === '23505' && err.constraint === 'users_employee_id_key') {
+      return res.status(400).json({ message: 'Employee ID already exists.' });
     }
     res.status(500).json({ message: 'Server error during registration.' });
   }
@@ -84,756 +113,851 @@ app.post('/register', async (req, res) => {
 
 // User Login
 app.post('/auth/login', async (req, res) => {
+  const { email, password } = req.body;
   try {
-    const { email, password } = req.body;
-    const { rows } = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
-    if (rows.length === 0) {
+    const userResult = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    const user = userResult.rows[0];
+
+    if (!user) {
       return res.status(400).json({ message: 'Invalid credentials.' });
     }
 
-    const user = rows[0];
-    // Explicitly ensure password_hash is a non-empty string before comparing
-    if (typeof user.password_hash !== 'string' || !user.password_hash.trim()) {
-      console.error('Login error: password_hash is not a valid string or is empty for user:', user.email);
-      return res.status(400).json({ message: 'Invalid credentials.' });
-    }
-    
-    // Ensure process.env.JWT_SECRET is actually loaded here for signing
-    if (!process.env.JWT_SECRET || !process.env.REFRESH_TOKEN_SECRET) {
-        console.error('JWT or Refresh Token secret is not defined in environment variables.');
-        return res.status(500).json({ message: 'Server configuration error: JWT secrets missing.' });
-    }
-
-    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
-    if (!isPasswordValid) {
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
       return res.status(400).json({ message: 'Invalid credentials.' });
     }
 
-    const accessToken = jwt.sign(
-      { id: user.id, role: user.role, employee_id: user.employee_id, name: user.name },
-      process.env.JWT_SECRET,
-      { expiresIn: '1h' }
-    );
-    const refreshToken = jwt.sign(
-      { id: user.id },
-      process.env.REFRESH_TOKEN_SECRET,
-      { expiresIn: '7d' }
-    );
+    // Generate JWT and refresh token
+    const accessToken = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '15m' }); // Short-lived
+    const refreshToken = jwt.sign({ id: user.id }, process.env.REFRESH_TOKEN_SECRET, { expiresIn: '7d' }); // Long-lived
 
-    // Store refresh token (e.g., in a secure, httpOnly cookie or database)
-    // For simplicity, we'll just send it, but a robust solution would store it.
-    res.cookie('refreshToken', refreshToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 7 * 24 * 60 * 60 * 1000 });
+    // Store refresh token in DB
+    await pool.query('UPDATE users SET refresh_token = $1 WHERE id = $2', [refreshToken, user.id]);
 
-    res.json({ accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, employee_id: user.employee_id, shift_type: user.shift_type } });
-  } catch (error) {
-    console.error('Login error:', error);
+    // Send refresh token as httpOnly cookie
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production', // Use secure in production (HTTPS)
+      sameSite: 'Lax', // 'Strict' or 'Lax' recommended for security
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
+
+    res.json({
+      message: 'Logged in successfully',
+      accessToken,
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, employee_id: user.employee_id, shift_type: user.shift_type }
+    });
+  } catch (err) {
+    console.error('Error during login:', err);
     res.status(500).json({ message: 'Server error during login.' });
   }
 });
 
 // Token Refresh
 app.post('/auth/refresh', async (req, res) => {
-  const refreshToken = req.cookies?.refreshToken; // Assuming refresh token is in an httpOnly cookie
-  if (!refreshToken) {
-    return res.status(401).json({ message: 'No refresh token provided.' });
-  }
+    const refreshToken = req.cookies.refreshToken;
+    if (!refreshToken) {
+        console.warn('No refresh token provided in cookies.');
+        return res.status(401).json({ message: 'No refresh token provided.' });
+    }
 
-  try {
-    // Ensure process.env.REFRESH_TOKEN_SECRET is actually loaded here
-    if (!process.env.REFRESH_TOKEN_SECRET) {
-        console.error('REFRESH_TOKEN_SECRET is not defined in environment variables.');
-        return res.status(500).json({ message: 'Server configuration error: Refresh Token secret missing.' });
+    try {
+        const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
+
+        const userResult = await pool.query('SELECT * FROM users WHERE id = $1 AND refresh_token = $2', [decoded.id, refreshToken]);
+        const user = userResult.rows[0];
+
+        if (!user) {
+            console.warn('Refresh token not found or invalid for user ID:', decoded.id);
+            return res.status(403).json({ message: 'Invalid refresh token.' });
+        }
+
+        const newAccessToken = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '15m' });
+        const newRefreshToken = jwt.sign({ id: user.id }, process.env.REFRESH_TOKEN_SECRET, { expiresIn: '7d' });
+
+        await pool.query('UPDATE users SET refresh_token = $1 WHERE id = $2', [newRefreshToken, user.id]);
+
+        res.cookie('refreshToken', newRefreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'Lax',
+            maxAge: 7 * 24 * 60 * 60 * 1000
+        });
+
+        res.json({
+            accessToken: newAccessToken,
+            user: { id: user.id, name: user.name, email: user.email, role: user.role, employee_id: user.employee_id, shift_type: user.shift_type }
+        });
+    } catch (err) {
+        console.error('Error refreshing token:', err.message);
+        // Clear cookie if token is invalid or expired
+        res.clearCookie('refreshToken', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'Lax' });
+        return res.status(403).json({ message: 'Failed to refresh token: ' + err.message });
     }
-    const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
-    const { rows } = await pool.query('SELECT id, name, email, role, employee_id, shift_type FROM users WHERE id = $1', [decoded.id]);
-    if (rows.length === 0) {
-      return res.status(403).json({ message: 'Invalid refresh token.' });
-    }
-    const user = rows[0];
-    const newAccessToken = jwt.sign(
-      { id: user.id, role: user.role, employee_id: user.employee_id, name: user.name },
-      process.env.JWT_SECRET,
-      { expiresIn: '1h' }
-    );
-    res.json({ accessToken: newAccessToken, user });
-  } catch (error) {
-    console.error('Refresh token error:', error);
-    res.status(403).json({ message: 'Invalid or expired refresh token.' });
-  }
 });
 
+
 // User Logout
-app.post('/auth/logout', (req, res) => {
-  res.clearCookie('refreshToken', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict' });
-  res.json({ message: 'Logged out successfully.' });
+app.post('/auth/logout', authenticate, async (req, res) => {
+    try {
+        // Clear refresh token from DB
+        await pool.query('UPDATE users SET refresh_token = NULL WHERE id = $1', [req.user.id]);
+        // Clear httpOnly cookie
+        res.clearCookie('refreshToken', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'Lax' });
+        res.status(200).json({ message: 'Logged out successfully.' });
+    } catch (err) {
+        console.error('Error during logout:', err);
+        res.status(500).json({ message: 'Server error during logout.' });
+    }
 });
 
 // Change Password
 app.post('/auth/change-password', authenticate, async (req, res) => {
-  try {
     const { currentPassword, newPassword } = req.body;
     const userId = req.user.id;
 
-    const { rows } = await pool.query('SELECT password_hash FROM users WHERE id = $1', [userId]);
-    if (rows.length === 0) {
-      return res.status(404).json({ message: 'User not found.' });
+    try {
+        const userResult = await pool.query('SELECT password FROM users WHERE id = $1', [userId]);
+        const user = userResult.rows[0];
+
+        if (!user) {
+            return res.status(404).json({ message: 'User not found.' });
+        }
+
+        const isMatch = await bcrypt.compare(currentPassword, user.password);
+        if (!isMatch) {
+            return res.status(400).json({ message: 'Current password incorrect.' });
+        }
+
+        const hashedNewPassword = await bcrypt.hash(newPassword, 10);
+        await pool.query('UPDATE users SET password = $1 WHERE id = $2', [hashedNewPassword, userId]);
+
+        res.status(200).json({ message: 'Password updated successfully.' });
+    } catch (err) {
+        console.error('Error changing password:', err);
+        res.status(500).json({ message: 'Server error during password change.' });
     }
+});
 
-    const user = rows[0];
-    const isPasswordValid = await bcrypt.compare(currentPassword, user.password_hash);
-    if (!isPasswordValid) {
-      return res.status(400).json({ message: 'Invalid current password.' });
+// Forgot Password - Send Reset Email
+app.post('/auth/forgot-password', async (req, res) => {
+    const { email } = req.body;
+    try {
+        const userResult = await pool.query('SELECT id, name FROM users WHERE email = $1', [email]);
+        const user = userResult.rows[0];
+
+        if (!user) {
+            return res.status(404).json({ message: 'User not found.' });
+        }
+
+        const resetToken = jwt.sign({ id: user.id }, process.env.RESET_PASSWORD_SECRET, { expiresIn: '1h' });
+        await pool.query('UPDATE users SET reset_token = $1 WHERE id = $2', [resetToken, user.id]);
+
+        const resetUrl = `${process.env.FRONTEND_URL}/?view=resetPassword&token=${resetToken}`;
+
+        await transporter.sendMail({
+            from: process.env.EMAIL_USER,
+            to: email,
+            subject: 'Password Reset Request',
+            html: `<p>Dear ${user.name},</p>
+                   <p>You requested a password reset. Click this link to reset your password:</p>
+                   <a href="${resetUrl}">${resetUrl}</a>
+                   <p>This link is valid for 1 hour.</p>
+                   <p>If you did not request this, please ignore this email.</p>`
+        });
+
+        res.status(200).json({ message: 'Password reset link sent to your email.' });
+    } catch (err) {
+        console.error('Error sending reset password email:', err);
+        res.status(500).json({ message: 'Server error sending reset password email.' });
     }
+});
 
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-    await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hashedNewPassword, userId]);
+// Reset Password - Using Token
+app.post('/auth/reset-password', async (req, res) => {
+    const { token, newPassword } = req.body;
+    try {
+        const decoded = jwt.verify(token, process.env.RESET_PASSWORD_SECRET);
+        const userResult = await pool.query('SELECT * FROM users WHERE id = $1 AND reset_token = $2', [decoded.id, token]);
+        const user = userResult.rows[0];
 
-    res.json({ message: 'Password updated successfully.' });
-  } catch (error) {
-    console.error('Change password error:', error);
-    res.status(500).json({ message: 'Server error changing password.' });
-  }
+        if (!user) {
+            return res.status(400).json({ message: 'Invalid or expired token.' });
+        }
+
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        await pool.query('UPDATE users SET password = $1, reset_token = NULL WHERE id = $2', [hashedNewPassword, user.id]);
+
+        res.status(200).json({ message: 'Password has been reset.' });
+    } catch (err) {
+        console.error('Error resetting password:', err);
+        res.status(500).json({ message: 'Server error resetting password.' });
+    }
 });
 
 
+// --- Attendance Routes ---
+
 // Check-in
 app.post('/attendance/checkin', authenticate, async (req, res) => {
-  try {
     const userId = req.user.id;
-    const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
-    const checkinTime = moment().tz('Asia/Kolkata').format('HH:mm:ss');
-    const userShiftType = req.user.shift_type;
+    const now = moment().tz('Asia/Kolkata');
+    const date = now.format('YYYY-MM-DD');
+    const checkinTime = now.format('HH:mm:ss');
 
-    // Check if user already checked in today
-    const existingAttendance = await pool.query(
-      'SELECT * FROM attendance WHERE user_id = $1 AND date = $2',
-      [userId, today]
-    );
+    try {
+        const userResult = await pool.query('SELECT shift_type FROM users WHERE id = $1', [userId]);
+        const user = userResult.rows[0];
 
-    if (existingAttendance.rows.length > 0) {
-      return res.status(400).json({ message: 'Already checked in today.' });
+        if (!user) {
+            return res.status(404).json({ message: 'User not found.' });
+        }
+
+        const existingAttendance = await pool.query(
+            'SELECT * FROM attendance WHERE user_id = $1 AND date = $2',
+            [userId, date]
+        );
+
+        if (existingAttendance.rows.length > 0 && existingAttendance.rows[0].check_in) {
+            return res.status(400).json({ message: 'You have already checked in today.' });
+        }
+
+        let status = 'present';
+        const expectedCheckinHour = user.shift_type === 'evening' ? 21 : 9; // 9 PM for evening, 9 AM for day
+
+        // Create a moment object for expected check-in time on the current date
+        const expectedCheckinTimeMoment = now.clone().hour(expectedCheckinHour).minute(0).second(0).millisecond(0);
+
+        if (now.isAfter(expectedCheckinTimeMoment)) {
+            status = 'late';
+        }
+
+        if (existingAttendance.rows.length > 0) {
+            await pool.query(
+                'UPDATE attendance SET check_in = $1, status = $2 WHERE user_id = $3 AND date = $4 RETURNING *',
+                [checkinTime, status, userId, date]
+            );
+        } else {
+            await pool.query(
+                'INSERT INTO attendance (user_id, date, check_in, status) VALUES ($1, $2, $3, $4) RETURNING *',
+                [userId, date, checkinTime, status]
+            );
+        }
+
+        res.status(200).json({ message: 'Checked in successfully!', data: { date, check_in: checkinTime, status } });
+    } catch (err) {
+        console.error('Error during check-in:', err);
+        res.status(500).json({ message: 'Server error during check-in.' });
     }
-
-    let status = 'present';
-    const checkinMoment = moment().tz('Asia/Kolkata');
-    let expectedCheckinHour;
-    if (userShiftType === 'evening') {
-      expectedCheckinHour = 21; // 9 PM
-    } else {
-      expectedCheckinHour = 9; // 9 AM
-    }
-
-    if (checkinMoment.hour() > expectedCheckinHour || (checkinMoment.hour() === expectedCheckinHour && checkinMoment.minute() > 0)) {
-      status = 'late';
-    }
-
-    const result = await pool.query(
-      'INSERT INTO attendance (user_id, date, check_in, status) VALUES ($1, $2, $3, $4) RETURNING *',
-      [userId, today, checkinTime, status]
-    );
-    res.status(201).json({ message: 'Check-in successful!', data: result.rows[0] });
-  } catch (error) {
-    console.error('Check-in error:', error);
-    res.status(500).json({ message: 'Server error during check-in.' });
-  }
 });
 
 // Check-out
 app.post('/attendance/checkout', authenticate, async (req, res) => {
-  try {
     const userId = req.user.id;
-    const today = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
-    const checkoutTime = moment().tz('Asia/Kolkata').format('HH:mm:ss');
+    const now = moment().tz('Asia/Kolkata');
+    const date = now.format('YYYY-MM-DD');
+    const checkoutTime = now.format('HH:mm:ss');
 
-    const result = await pool.query(
-      'UPDATE attendance SET check_out = $1 WHERE user_id = $2 AND date = $3 AND check_out IS NULL RETURNING *',
-      [checkoutTime, userId, today]
-    );
+    try {
+        const attendanceRecord = await pool.query(
+            'SELECT * FROM attendance WHERE user_id = $1 AND date = $2',
+            [userId, date]
+        );
 
-    if (result.rows.length === 0) {
-      return res.status(400).json({ message: 'No active check-in found for today or already checked out.' });
+        if (attendanceRecord.rows.length === 0) {
+            return res.status(400).json({ message: 'You have not checked in today.' });
+        }
+        if (attendanceRecord.rows[0].check_out) {
+            return res.status(400).json({ message: 'You have already checked out today.' });
+        }
+
+        await pool.query(
+            'UPDATE attendance SET check_out = $1 WHERE user_id = $2 AND date = $3 RETURNING *',
+            [checkoutTime, userId, date]
+        );
+
+        res.status(200).json({ message: 'Checked out successfully!', data: { date, check_out: checkoutTime } });
+    } catch (err) {
+        console.error('Error during check-out:', err);
+        res.status(500).json({ message: 'Server error during check-out.' });
     }
-    res.json({ message: 'Check-out successful!', data: result.rows[0] });
-  } catch (error) {
-    console.error('Check-out error:', error);
-    res.status(500).json({ message: 'Server error during check-out.' });
-  }
 });
 
-// Get User Attendance
+// Get User Attendance Records
 app.get('/attendance', authenticate, async (req, res) => {
-  try {
     const userId = req.user.id;
-    const { rows } = await pool.query(
-      'SELECT * FROM attendance WHERE user_id = $1 ORDER BY date DESC',
-      [userId]
-    );
-    res.json(rows);
-  } catch (error) {
-    console.error('Get attendance error:', error);
-    res.status(500).json({ message: 'Server error getting attendance.' });
-  }
+    try {
+        const result = await pool.query('SELECT * FROM attendance WHERE user_id = $1 ORDER BY date DESC', [userId]);
+        res.status(200).json(result.rows);
+    } catch (err) {
+        console.error('Error fetching attendance records:', err);
+        res.status(500).json({ message: 'Server error fetching attendance records.' });
+    }
 });
 
 // Request Attendance Correction
 app.post('/attendance/correction-request', authenticate, async (req, res) => {
-  try {
+    const userId = req.user.id;
     const { date, reason } = req.body;
-    const userId = req.user.id;
-    const userName = req.user.name;
-    const employeeId = req.user.employee_id;
+    const requestedAt = moment().tz('Asia/Kolkata').toISOString();
 
-    // Check if a correction request for this date already exists and is pending
-    const existingRequest = await pool.query(
-      'SELECT * FROM attendance_corrections WHERE user_id = $1 AND date = $2 AND status = $3',
-      [userId, date, 'pending']
-    );
-
-    if (existingRequest.rows.length > 0) {
-      return res.status(400).json({ message: 'A pending correction request for this date already exists.' });
+    if (!moment(date).isValid()) {
+        return res.status(400).json({ message: 'Invalid date format.' });
+    }
+    // Ensure the requested date is not in the future
+    if (moment(date).isAfter(moment().tz('Asia/Kolkata'), 'day')) {
+        return res.status(400).json({ message: 'Correction can only be requested for past or current dates.' });
     }
 
-    const result = await pool.query(
-      'INSERT INTO attendance_corrections (user_id, user_name, employee_id, date, reason, status) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-      [userId, userName, employeeId, date, reason, 'pending']
-    );
-    res.status(201).json({ message: 'Correction request submitted successfully!', data: result.rows[0] });
-  } catch (error) {
-    console.error('Correction request error:', error);
-    res.status(500).json({ message: 'Server error submitting correction request.' });
-  }
+    try {
+        // Optional: Check if a correction request for this date/user already exists
+        const existingRequest = await pool.query(
+            'SELECT * FROM attendance_corrections WHERE user_id = $1 AND date = $2 AND status = $3',
+            [userId, date, 'pending']
+        );
+        if (existingRequest.rows.length > 0) {
+            return res.status(400).json({ message: 'A pending correction request for this date already exists.' });
+        }
+
+        const result = await pool.query(
+            'INSERT INTO attendance_corrections (user_id, date, reason, status, requested_at) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+            [userId, date, reason, 'pending', requestedAt]
+        );
+        res.status(201).json({ message: 'Correction request submitted successfully.', data: result.rows[0] });
+    } catch (err) {
+        console.error('Error submitting correction request:', err);
+        res.status(500).json({ message: 'Server error submitting correction request.' });
+    }
 });
 
-// Apply Leave
+
+// --- Leave Routes ---
+
+// Apply for Leave
 app.post('/leaves/apply', authenticate, async (req, res) => {
-  try {
+    const userId = req.user.id;
     const { from_date, to_date, reason } = req.body;
-    const userId = req.user.id;
-    const userName = req.user.name;
-    const employeeId = req.user.employee_id;
+    const appliedAt = moment().tz('Asia/Kolkata').toISOString();
 
-    if (!moment(from_date).isValid() || !moment(to_date).isValid() || moment(from_date).isAfter(moment(to_date))) {
-      return res.status(400).json({ message: 'Invalid date range provided.' });
+    if (!moment(from_date).isValid() || !moment(to_date).isValid()) {
+        return res.status(400).json({ message: 'Invalid date format.' });
+    }
+    if (moment(from_date).isAfter(to_date)) {
+        return res.status(400).json({ message: 'From date cannot be after to date.' });
     }
 
-    const result = await pool.query(
-      'INSERT INTO leaves (user_id, user_name, employee_id, from_date, to_date, reason, status) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
-      [userId, userName, employeeId, from_date, to_date, reason, 'pending']
-    );
-    res.status(201).json({ message: 'Leave application submitted!', data: result.rows[0] });
-  } catch (error) {
-    console.error('Leave application error:', error);
-    res.status(500).json({ message: 'Server error submitting leave application.' });
-  }
+    try {
+        const result = await pool.query(
+            'INSERT INTO leaves (user_id, from_date, to_date, reason, status, applied_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+            [userId, from_date, to_date, reason, 'pending', appliedAt]
+        );
+        res.status(201).json({ message: 'Leave application submitted successfully.', data: result.rows[0] });
+    } catch (err) {
+        console.error('Error submitting leave application:', err);
+        res.status(500).json({ message: 'Server error submitting leave application.' });
+    }
 });
 
-// Get User Leaves
+// Get User Leave Applications
 app.get('/leaves', authenticate, async (req, res) => {
-  try {
     const userId = req.user.id;
-    const { rows } = await pool.query(
-      'SELECT * FROM leaves WHERE user_id = $1 ORDER BY from_date DESC',
-      [userId]
-    );
-    res.json(rows);
-  } catch (error) {
-    console.error('Get leaves error:', error);
-    res.status(500).json({ message: 'Server error getting leaves.' });
-  }
+    try {
+        const result = await pool.query('SELECT * FROM leaves WHERE user_id = $1 ORDER BY applied_at DESC', [userId]);
+        res.status(200).json(result.rows);
+    } catch (err) {
+        console.error('Error fetching leave applications:', err);
+        res.status(500).json({ message: 'Server error fetching leave applications.' });
+    }
 });
 
-// Request Leave Cancellation (Employee)
+// Request Leave Cancellation
 app.post('/leaves/cancel-request', authenticate, async (req, res) => {
-  try {
-    const { leave_id } = req.body;
     const userId = req.user.id;
+    const { leave_id } = req.body;
 
-    const { rows } = await pool.query('SELECT * FROM leaves WHERE id = $1 AND user_id = $2', [leave_id, userId]);
+    try {
+        const leaveResult = await pool.query('SELECT status FROM leaves WHERE id = $1 AND user_id = $2', [leave_id, userId]);
+        const leave = leaveResult.rows[0];
 
-    if (rows.length === 0) {
-      return res.status(404).json({ message: 'Leave request not found or you do not have permission.' });
+        if (!leave) {
+            return res.status(404).json({ message: 'Leave application not found or you do not have permission.' });
+        }
+        if (leave.status === 'cancellation_pending' || leave.status === 'cancelled') {
+            return res.status(400).json({ message: 'Leave is already pending cancellation or has been cancelled.' });
+        }
+
+        await pool.query(
+            'UPDATE leaves SET status = $1 WHERE id = $2 AND user_id = $3',
+            ['cancellation_pending', leave_id, userId]
+        );
+        res.status(200).json({ message: 'Leave cancellation request submitted.' });
+    } catch (err) {
+        console.error('Error submitting leave cancellation request:', err);
+        res.status(500).json({ message: 'Server error submitting leave cancellation request.' });
     }
-
-    const leave = rows[0];
-
-    // Only allow cancellation request for 'approved' leaves
-    if (leave.status !== 'approved') {
-      return res.status(400).json({ message: 'Only approved leaves can be requested for cancellation.' });
-    }
-
-    // Check if a cancellation request is already pending
-    if (leave.status === 'cancellation_pending') {
-      // Removed the unintended characters at the end of the message
-      return res.status(400).json({ message: 'Cancellation request for this leave is already pending.' });
-    }
-
-    await pool.query('UPDATE leaves SET status = $1 WHERE id = $2', ['cancellation_pending', leave_id]);
-    res.json({ message: 'Leave cancellation request submitted successfully.' });
-  } catch (error) {
-    console.error('Leave cancellation request error:', error);
-    res.status(500).json({ message: 'Server error processing cancellation request.' });
-  }
 });
 
-// Get Holidays
-app.get('/holidays', authenticate, async (req, res) => {
-  try {
-    const { year } = req.query;
-    const targetYear = year || moment().tz('Asia/Kolkata').year();
+// --- Admin Routes (Requires authorizeAdmin middleware) ---
 
-    const { rows } = await pool.query('SELECT * FROM holidays WHERE EXTRACT(YEAR FROM date)=$1 ORDER BY date', [targetYear]);
-    res.json(rows);
-  } catch (error) {
-    console.error('Get holidays error:', error);
-    res.status(500).json({ message: 'Server error getting holidays.' });
-  }
-});
-
-// Admin Controller Routes (using adminController for now, but extending functionality here)
-
-// Admin: Get all correction requests
-app.get('/admin/attendance/corrections', authenticate, authorizeAdmin, async (req, res) => {
-  try {
-    const { rows } = await pool.query(`
-      SELECT ac.*, u.name as user_name, u.employee_id
-      FROM attendance_corrections ac
-      JOIN users u ON ac.user_id = u.id
-      ORDER BY ac.date DESC, ac.status ASC
-    `);
-    res.json(rows);
-  } catch (error) {
-    console.error('Admin get all corrections error:', error);
-    res.status(500).json({ message: 'Server error getting all corrections.' });
-  }
-});
-
-// Admin: Review attendance correction (approve/reject)
-app.post('/admin/attendance/correction-review', authenticate, authorizeAdmin, async (req, res) => {
-  try {
-    const { id, status } = req.body;
-    const adminName = req.user.name; // Get admin's name from token
-
-    if (!id || !['approved', 'rejected'].includes(status)) {
-      return res.status(400).json({ message: 'Invalid correction ID or status.' });
-    }
-
-    const { rows } = await pool.query('SELECT * FROM attendance_corrections WHERE id=$1', [id]);
-    if (rows.length === 0) {
-      return res.status(404).json({ message: 'Correction request not found.' });
-    }
-
-    const correction = rows[0];
-    if (correction.status !== 'pending') {
-      return res.status(400).json({ message: 'Correction request already processed.' });
-    }
-
-    await pool.query(
-      'UPDATE attendance_corrections SET status=$1, assigned_admin_name=$2 WHERE id=$3',
-      [status, adminName, id]
-    );
-
-    // If approved, create or update attendance record
-    if (status === 'approved') {
-      const { user_id, date } = correction;
-      const userResult = await pool.query('SELECT shift_type FROM users WHERE id = $1', [user_id]);
-      const userShiftType = userResult.rows[0].shift_type;
-
-      // Construct full timestamp strings for check_in and check_out
-      const correctedDateMoment = moment.tz(date, 'YYYY-MM-DD', 'Asia/Kolkata');
-
-      let defaultCheckIn;
-      let defaultCheckOut;
-
-      if (userShiftType === 'evening') {
-        defaultCheckIn = correctedDateMoment.clone().hour(21).minute(0).second(0).toISOString(); // 9 PM same day
-        // Evening shift checkout is usually next day morning
-        defaultCheckOut = correctedDateMoment.clone().add(1, 'day').hour(5).minute(0).second(0).toISOString(); // 5 AM next day
-      } else {
-        defaultCheckIn = correctedDateMoment.clone().hour(9).minute(0).second(0).toISOString(); // 9 AM same day
-        defaultCheckOut = correctedDateMoment.clone().hour(17).minute(0).second(0).toISOString(); // 5 PM same day
-      }
-
-      await pool.query(
-        'INSERT INTO attendance (user_id, date, check_in, check_out, status) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (user_id, date) DO UPDATE SET check_in = EXCLUDED.check_in, check_out = EXCLUDED.check_out, status = EXCLUDED.status',
-        [user_id, date, defaultCheckIn, defaultCheckOut, 'present']
-      );
-
-      // --- NEW LOGIC: Update overlapping approved leave records ---
-      await pool.query(
-          `UPDATE leaves
-           SET status = 'overridden_by_correction', assigned_admin_name = $1
-           WHERE user_id = $2
-             AND $3 BETWEEN from_date AND to_date
-             AND status = 'approved'`, // Only affect approved leaves
-          [adminName, user_id, date]
-      );
-      // --- END NEW LOGIC ---
-    }
-    res.json({ message: `Correction request ${status}.` });
-  } catch (error) {
-    console.error('Correction review error:', error);
-    res.status(500).json({ message: 'Server error processing correction.' });
-  }
-});
-
-// Admin: Get all leave requests
+// Get All Pending Leave Applications for Admin
 app.get('/admin/leaves', authenticate, authorizeAdmin, async (req, res) => {
-  try {
-    const { rows } = await pool.query(`
-      SELECT l.*, u.name as user_name, u.employee_id
-      FROM leaves l
-      JOIN users u ON l.user_id = u.id
-      ORDER BY l.from_date DESC, l.status ASC
-    `);
-    res.json(rows);
-  } catch (error) {
-    console.error('Admin get all leaves error:', error);
-    res.status(500).json({ message: 'Server error getting all leaves.' });
-  }
+    try {
+        const result = await pool.query(`
+            SELECT l.*, u.name as user_name, u.employee_id
+            FROM leaves l
+            JOIN users u ON l.user_id = u.id
+            WHERE l.status IN ('pending', 'cancellation_pending')
+            ORDER BY l.applied_at ASC
+        `);
+        res.status(200).json(result.rows);
+    } catch (err) {
+        console.error('Error fetching all leave applications for admin:', err);
+        res.status(500).json({ message: 'Server error fetching leave applications.' });
+    }
 });
 
-// Admin: Update leave status (approve/reject for initial application)
+// Update Leave Status by Admin
 app.post('/admin/leaves/update', authenticate, authorizeAdmin, async (req, res) => {
-  try {
-    const { leave_id, status } = req.body;
-    const adminName = req.user.name;
+    const { leave_id, status } = req.body; // status should be 'approved' or 'rejected'
+    const adminId = req.user.id;
+    const adminNameResult = await pool.query('SELECT name FROM users WHERE id = $1', [adminId]);
+    const adminName = adminNameResult.rows[0]?.name || 'Admin';
 
-    if (!leave_id || !['approved', 'rejected'].includes(status)) {
-      return res.status(400).json({ message: 'Invalid leave ID or status.' });
+    if (!['approved', 'rejected'].includes(status)) {
+        return res.status(400).json({ message: 'Invalid status provided.' });
     }
 
-    const { rows } = await pool.query('SELECT * FROM leaves WHERE id=$1', [leave_id]);
-    if (rows.length === 0) {
-      return res.status(404).json({ message: 'Leave request not found.' });
-    }
+    try {
+        await pool.query(
+            'UPDATE leaves SET status = $1, reviewed_by = $2, reviewed_at = NOW() WHERE id = $3 AND status = $4',
+            [status, adminId, leave_id, 'pending']
+        );
+        // If approved, add to attendance for all days in the leave period
+        if (status === 'approved') {
+            const leaveDetailsResult = await pool.query('SELECT user_id, from_date, to_date FROM leaves WHERE id = $1', [leave_id]);
+            const leaveDetails = leaveDetailsResult.rows[0];
 
-    const leave = rows[0];
-    // Only allow update if the current status is 'pending' and not a cancellation request
-    if (leave.status !== 'pending') {
-      return res.status(400).json({ message: 'Leave request already processed or is a cancellation request.' });
-    }
+            if (leaveDetails) {
+                let currentDate = moment(leaveDetails.from_date);
+                const endDate = moment(leaveDetails.to_date);
 
-    await pool.query(
-      'UPDATE leaves SET status=$1, assigned_admin_name=$2 WHERE id=$3',
-      [status, adminName, leave_id]
-    );
-    res.json({ message: `Leave request ${status}.` });
-  } catch (error) {
-    console.error('Leave approval error:', error);
-    res.status(500).json({ message: 'Server error processing leave.' });
-  }
+                while (currentDate.isSameOrBefore(endDate)) {
+                    const dateFormatted = currentDate.format('YYYY-MM-DD');
+                    // Check if an attendance record already exists for this day (e.g., if they checked in before leave was approved)
+                    const existingAttendance = await pool.query(
+                        'SELECT * FROM attendance WHERE user_id = $1 AND date = $2',
+                        [leaveDetails.user_id, dateFormatted]
+                    );
+
+                    if (existingAttendance.rows.length === 0) {
+                        await pool.query(
+                            'INSERT INTO attendance (user_id, date, status, check_in, check_out, admin_approved_leave_id) VALUES ($1, $2, $3, $4, $5, $6)',
+                            [leaveDetails.user_id, dateFormatted, 'on_leave', null, null, leave_id]
+                        );
+                    } else {
+                        // If exists, update its status to 'on_leave' if it was 'absent'
+                        await pool.query(
+                            'UPDATE attendance SET status = $1, admin_approved_leave_id = $2 WHERE user_id = $3 AND date = $4 AND status = $5',
+                            ['on_leave', leave_id, leaveDetails.user_id, dateFormatted, 'absent']
+                        );
+                    }
+                    currentDate.add(1, 'day');
+                }
+            }
+        }
+        res.status(200).json({ message: `Leave application ${status} successfully.` });
+    } catch (err) {
+        console.error('Error updating leave status:', err);
+        res.status(500).json({ message: 'Server error updating leave status.' });
+    }
 });
 
-// Admin: Update leave cancellation status
+// Update Leave Cancellation Status by Admin
 app.post('/admin/leaves/update-cancellation', authenticate, authorizeAdmin, async (req, res) => {
-  try {
-    const { leave_id, status } = req.body;
-    const adminName = req.user.name;
+    const { leave_id, status } = req.body; // status should be 'cancellation_approved' or 'cancellation_rejected'
+    const adminId = req.user.id;
+    const adminNameResult = await pool.query('SELECT name FROM users WHERE id = $1', [adminId]);
+    const adminName = adminNameResult.rows[0]?.name || 'Admin';
 
-    if (!leave_id || !['cancellation_approved', 'cancellation_rejected'].includes(status)) {
-      return res.status(400).json({ message: 'Invalid leave ID or cancellation status.' });
+    if (!['cancellation_approved', 'cancellation_rejected'].includes(status)) {
+        return res.status(400).json({ message: 'Invalid status provided for cancellation.' });
     }
 
-    const { rows } = await pool.query('SELECT * FROM leaves WHERE id=$1', [leave_id]);
-    if (rows.length === 0) {
-      return res.status(404).json({ message: 'Leave request not found.' });
+    try {
+        await pool.query(
+            'UPDATE leaves SET status = $1, reviewed_by = $2, reviewed_at = NOW() WHERE id = $3 AND status = $4',
+            [status === 'cancellation_approved' ? 'cancelled' : 'approved', // If approved, set to cancelled; if rejected, set back to approved
+             adminId, leave_id, 'cancellation_pending']
+        );
+
+        // If cancellation is approved, remove the 'on_leave' attendance records
+        if (status === 'cancellation_approved') {
+            const leaveDetailsResult = await pool.query('SELECT user_id, from_date, to_date FROM leaves WHERE id = $1', [leave_id]);
+            const leaveDetails = leaveDetailsResult.rows[0];
+
+            if (leaveDetails) {
+                let currentDate = moment(leaveDetails.from_date);
+                const endDate = moment(leaveDetails.to_date);
+
+                while (currentDate.isSameOrBefore(endDate)) {
+                    const dateFormatted = currentDate.format('YYYY-MM-DD');
+                    await pool.query(
+                        'DELETE FROM attendance WHERE user_id = $1 AND date = $2 AND status = $3 AND admin_approved_leave_id = $4',
+                        [leaveDetails.user_id, dateFormatted, 'on_leave', leave_id]
+                    );
+                    currentDate.add(1, 'day');
+                }
+            }
+        }
+        res.status(200).json({ message: `Leave cancellation ${status.replace('cancellation_', '')} successfully.` });
+    } catch (err) {
+        console.error('Error updating leave cancellation status:', err);
+        res.status(500).json({ message: 'Server error updating leave cancellation status.' });
     }
-
-    const leave = rows[0];
-
-    // Ensure it's a pending cancellation request
-    if (leave.status !== 'cancellation_pending') {
-      return res.status(400).json({ message: 'Not a pending cancellation request.' });
-    }
-
-    let finalStatus = leave.status;
-    if (status === 'cancellation_approved') {
-      finalStatus = 'cancelled';
-    } else if (status === 'cancellation_rejected') {
-      // If cancellation is rejected, revert to the previous approved status
-      finalStatus = 'approved';
-    }
-
-    await pool.query(
-      'UPDATE leaves SET status=$1, assigned_admin_name=$2 WHERE id=$3',
-      [finalStatus, adminName, leave_id]
-    );
-    res.json({ message: `Leave cancellation ${status.replace('cancellation_', '')}.` });
-  } catch (error) {
-    console.error('Leave cancellation update error:', error);
-    res.status(500).json({ message: 'Server error processing leave cancellation.' });
-  }
 });
 
 
-// Admin: Get daily attendance for all employees
+// Get All Pending Correction Requests for Admin
+app.get('/admin/attendance/corrections', authenticate, authorizeAdmin, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT ac.*, u.name as user_name, u.employee_id
+            FROM attendance_corrections ac
+            JOIN users u ON ac.user_id = u.id
+            WHERE ac.status = 'pending'
+            ORDER BY ac.requested_at ASC
+        `);
+        res.status(200).json(result.rows);
+    } catch (err) {
+        console.error('Error fetching all correction requests for admin:', err);
+        res.status(500).json({ message: 'Server error fetching correction requests.' });
+    }
+});
+
+// Update Correction Request Status by Admin
+app.post('/admin/attendance/correction-review', authenticate, authorizeAdmin, async (req, res) => {
+    const { id, status } = req.body; // status should be 'approved' or 'rejected'
+    const adminId = req.user.id;
+    const adminNameResult = await pool.query('SELECT name FROM users WHERE id = $1', [adminId]);
+    const adminName = adminNameResult.rows[0]?.name || 'Admin';
+
+    if (!['approved', 'rejected'].includes(status)) {
+        return res.status(400).json({ message: 'Invalid status provided.' });
+    }
+
+    try {
+        const correctionResult = await pool.query('SELECT user_id, date, reason FROM attendance_corrections WHERE id = $1', [id]);
+        const correction = correctionResult.rows[0];
+
+        if (!correction) {
+            return res.status(404).json({ message: 'Correction request not found.' });
+        }
+
+        await pool.query(
+            'UPDATE attendance_corrections SET status = $1, reviewed_by = $2, reviewed_at = NOW() WHERE id = $3',
+            [status, adminId, id]
+        );
+
+        if (status === 'approved') {
+            // Apply the correction: e.g., mark as present if previously absent, or adjust times.
+            // This example simply changes status to 'present'. You might need more complex logic here
+            // based on the 'reason' or if you want to allow check-in/out time adjustments.
+            await pool.query(
+                'INSERT INTO attendance (user_id, date, status, admin_corrected_request_id) VALUES ($1, $2, $3, $4) ON CONFLICT (user_id, date) DO UPDATE SET status = EXCLUDED.status, admin_corrected_request_id = EXCLUDED.admin_corrected_request_id',
+                [correction.user_id, correction.date, 'present', id]
+            );
+        }
+
+        res.status(200).json({ message: `Correction request ${status} successfully.` });
+    } catch (err) {
+        console.error('Error updating correction request status:', err);
+        res.status(500).json({ message: 'Server error updating correction request status.' });
+    }
+});
+
+// Admin: Get all employee attendance for a specific date
 app.get('/admin/attendance/daily', authenticate, authorizeAdmin, async (req, res) => {
-  try {
     const { date } = req.query;
-    const targetDate = date || moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+    if (!date || !moment(date).isValid()) {
+        return res.status(400).json({ message: 'Valid date is required.' });
+    }
 
-    // Fetch all active users
-    const usersResult = await pool.query('SELECT id, name, employee_id, shift_type FROM users');
-    const allUsers = usersResult.rows;
-
-    // Fetch attendance for the target date
-    const attendanceResult = await pool.query(
-      'SELECT user_id, check_in, check_out, status FROM attendance WHERE date = $1',
-      [targetDate]
-    );
-    const dailyAttendanceMap = new Map();
-    attendanceResult.rows.forEach(att => {
-      dailyAttendanceMap.set(att.user_id, att);
-    });
-
-    // Fetch leaves for the target date
-    // Modified: Include 'overridden_by_correction' in the WHERE clause so these are explicitly skipped
-    const leavesResult = await pool.query(
-      'SELECT user_id, status FROM leaves WHERE $1 BETWEEN from_date AND to_date AND status = \'approved\'',
-      [targetDate]
-    );
-    const dailyLeavesMap = new Map();
-    leavesResult.rows.forEach(leave => {
-      dailyLeavesMap.set(leave.user_id, leave);
-    });
-
-    // Determine status for each user
-    const detailedAttendance = allUsers.map(user => {
-      const attendanceRecord = dailyAttendanceMap.get(user.id);
-      const leaveRecord = dailyLeavesMap.get(user.id);
-
-      let status = 'absent'; // Default to absent
-      let check_in = null;
-      let check_out = null;
-
-      if (attendanceRecord) {
-        // Ensure attendanceRecord.status is a string before replacement
-        status = String(attendanceRecord.status || 'unknown');
-        check_in = attendanceRecord.check_in;
-        check_out = attendanceRecord.check_out;
-      } else if (leaveRecord) {
-        status = 'on_leave'; // Custom status for on leave
-      }
-
-      return {
-        user_id: user.id,
-        name: user.name,
-        employee_id: user.employee_id,
-        shift_type: user.shift_type,
-        status: String(status || 'unknown').replace(/_/g, ' ').toUpperCase(), // Ensure 'status' is a string before calling replace
-        check_in: check_in ? moment(check_in, 'HH:mm:ss').format('hh:mm A') : null,
-        check_out: check_out ? moment(check_out, 'HH:mm:ss').format('hh:mm A') : null,
-      };
-    });
-
-    res.json(detailedAttendance);
-  } catch (error) {
-    console.error('Admin get daily attendance error:', error);
-    res.status(500).json({ message: 'Server error getting daily attendance.' });
-  }
+    try {
+        const query = `
+            SELECT
+                u.id AS user_id,
+                u.name,
+                u.employee_id,
+                u.shift_type,
+                COALESCE(a.status, 'Absent') AS status,
+                a.check_in,
+                a.check_out
+            FROM users u
+            LEFT JOIN attendance a ON u.id = a.user_id AND a.date = $1
+            ORDER BY u.name ASC;
+        `;
+        const result = await pool.query(query, [date]);
+        res.status(200).json(result.rows);
+    } catch (err) {
+        console.error('Error fetching all employee daily attendance:', err);
+        res.status(500).json({ message: 'Server error fetching daily attendance.' });
+    }
 });
 
-// Admin: Get monthly summary (present days, leave days)
+// Admin: Get monthly attendance summary for all employees
 app.get('/admin/analytics/monthly-summary', authenticate, authorizeAdmin, async (req, res) => {
-  try {
     const { year, month } = req.query;
-    console.log(`Analytics request for Year: ${year}, Month: ${month}`); // Added log
+
     if (!year || !month) {
-      return res.status(400).json({ message: 'Year and month are required.' });
+        return res.status(400).json({ message: 'Year and month are required.' });
     }
 
-    // Correct moment construction for year/month
-    const startDate = moment.tz([parseInt(year), parseInt(month) - 1, 1], 'Asia/Kolkata').startOf('month');
-    const endDate = moment.tz([parseInt(year), parseInt(month) - 1, 1], 'Asia/Kolkata').endOf('month');
-    console.log(`Calculated Date Range: ${startDate.format('YYYY-MM-DD')} to ${endDate.format('YYYY-MM-DD')}`); // Added log
+    const startDate = moment.tz([year, month - 1, 1], 'Asia/Kolkata').startOf('month').format('YYYY-MM-DD');
+    const endDate = moment.tz([year, month - 1, 1], 'Asia/Kolkata').endOf('month').format('YYYY-MM-DD');
 
-
-    // Fetch all users
-    const usersResult = await pool.query('SELECT id, name, employee_id FROM users');
-    const allUsers = usersResult.rows;
-    console.log(`Found ${allUsers.length} users for analytics.`); // Added log
-
-    const monthlySummary = [];
-
-    for (const user of allUsers) {
-      let presentDays = 0;
-      let leaveDays = 0;
-
-      // Count present/late days from attendance
-      const attendanceCountResult = await pool.query(
-        'SELECT COUNT(*) FROM attendance WHERE user_id = $1 AND date BETWEEN $2 AND $3 AND (status = \'present\' OR status = \'late\')',
-        [user.id, startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]
-      );
-      presentDays = parseInt(attendanceCountResult.rows[0].count, 10);
-
-      // Count approved leave days - EXCLUDING those overridden by correction
-      const leaveCountResult = await pool.query(
-        `SELECT
-           SUM(CASE
-             WHEN from_date <= $3 AND to_date >= $2
-             THEN LEAST($3, to_date) - GREATEST($2, from_date) + 1
-             ELSE 0 -- Explicitly return 0 if no overlap to prevent NULL from SUM
-           END) as total_leave_days
-         FROM leaves
-         WHERE user_id = $1
-           AND status = 'approved' -- Only count explicitly approved leaves
-           AND (from_date <= $3 AND to_date >= $2)`,
-        [user.id, startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]
-      );
-      // Ensure total_leave_days is a number, default to 0 if null
-      leaveDays = parseInt(leaveCountResult.rows[0].total_leave_days || 0, 10);
-
-      console.log(`User ${user.name} (ID: ${user.employee_id}): Present Days = ${presentDays}, Leave Days = ${leaveDays}`); // Added log
-
-      monthlySummary.push({
-        user_id: user.id,
-        name: user.name,
-        employee_id: user.employee_id,
-        present_days: presentDays,
-        leave_days: leaveDays,
-      });
+    try {
+        const query = `
+            SELECT
+                u.id AS user_id,
+                u.name,
+                u.employee_id,
+                COUNT(CASE WHEN a.status IN ('present', 'late') THEN 1 END) AS present_days,
+                COUNT(CASE WHEN a.status = 'on_leave' THEN 1 END) AS leave_days
+            FROM users u
+            LEFT JOIN attendance a ON u.id = a.user_id AND a.date BETWEEN $1 AND $2
+            GROUP BY u.id, u.name, u.employee_id
+            ORDER BY u.name ASC;
+        `;
+        const result = await pool.query(query, [startDate, endDate]);
+        res.status(200).json(result.rows);
+    } catch (err) {
+        console.error('Error fetching monthly summary for admin:', err);
+        res.status(500).json({ message: 'Server error fetching monthly summary.' });
     }
-
-    console.log('Final Monthly Summary:', monthlySummary); // Added log
-    res.json(monthlySummary);
-  } catch (error) {
-    console.error('Admin get monthly summary error:', error);
-    res.status(500).json({ message: 'Server error getting monthly summary.' });
-  }
 });
 
-
-// Admin: Export attendance data to CSV (modified for per-employee filtering)
+// Admin: Export attendance data to CSV
 app.get('/admin/attendance/export', authenticate, authorizeAdmin, async (req, res) => {
-  try {
     const { year, month, employee_id, employee_name } = req.query;
 
     if (!year || !month) {
-      return res.status(400).json({ message: 'Year and month are required for export.' });
+        return res.status(400).json({ message: 'Year and month are required for export.' });
     }
 
-    let userId = null;
-    let empIdForHeader = ''; // For the header if employee_id is used
-    let userNameForHeader = 'All Employees'; // For the header if no specific employee
-
-    // Find user by employee_id or employee_name if provided
-    if (employee_id) {
-      const userResult = await pool.query('SELECT id, name, employee_id FROM users WHERE employee_id = $1', [employee_id]);
-      if (userResult.rows.length > 0) {
-        userId = userResult.rows[0].id;
-        userNameForHeader = userResult.rows[0].name;
-        empIdForHeader = userResult.rows[0].employee_id;
-      } else {
-        return res.status(404).json({ message: 'Employee ID not found.' });
-      }
-    } else if (employee_name) {
-      const userResult = await pool.query('SELECT id, name, employee_id FROM users WHERE name ILIKE $1', [`%${employee_name}%`]);
-      if (userResult.rows.length > 0) {
-        userId = userResult.rows[0].id;
-        userNameForHeader = userResult.rows[0].name;
-        empIdForHeader = userResult.rows[0].employee_id; // Get employee_id for header
-      } else {
-        return res.status(404).json({ message: 'Employee name not found.' });
-      }
-    }
-
-    // Correct moment construction for year/month
     const startDate = moment.tz([parseInt(year), parseInt(month) - 1, 1], 'Asia/Kolkata').startOf('month');
     const endDate = moment.tz([parseInt(year), parseInt(month) - 1, 1], 'Asia/Kolkata').endOf('month');
 
-    // Fetch attendance records for the specified period and user (if applicable)
-    let attendanceQuery = `SELECT * FROM attendance WHERE date BETWEEN $1 AND $2`;
-    // Modified: Fetch only leaves that are explicitly 'approved' and not 'overridden_by_correction'
-    let leaveQuery = `SELECT * FROM leaves WHERE status = 'approved' AND (from_date <= $2 AND to_date >= $1)`;
-    let holidayQuery = `SELECT * FROM holidays WHERE date BETWEEN $1 AND $2`;
+    let query = `
+        SELECT
+            u.name AS employee_name,
+            u.employee_id,
+            u.shift_type,
+            g.date AS attendance_date,
+            a.check_in,
+            a.check_out,
+            COALESCE(a.status, 'Absent') AS status,
+            l.reason AS leave_reason,
+            h.name AS holiday_name
+        FROM users u
+        CROSS JOIN GENERATE_SERIES($1::date, $2::date, '1 day'::interval) AS g(date)
+        LEFT JOIN attendance a ON u.id = a.user_id AND a.date = g.date
+        LEFT JOIN leaves l ON u.id = l.user_id AND g.date BETWEEN l.from_date AND l.to_date AND l.status = 'approved'
+        LEFT JOIN holidays h ON g.date = h.date
+    `;
+    const queryParams = [startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')];
+    let userFilter = '';
+    let userNameForHeader = '';
+    let empIdForHeader = '';
 
-    const baseParams = [startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')];
-    const paramsWithUser = [...baseParams];
-
-    if (userId) {
-      attendanceQuery += ` AND user_id = $3`;
-      leaveQuery += ` AND user_id = $3`;
-      paramsWithUser.push(userId);
+    if (employee_id) {
+        userFilter = ` WHERE u.employee_id = $${queryParams.length + 1}`;
+        queryParams.push(employee_id);
+        const userDetails = await pool.query('SELECT name FROM users WHERE employee_id = $1', [employee_id]);
+        userNameForHeader = userDetails.rows[0]?.name || 'Unknown Employee';
+        empIdForHeader = employee_id;
+    } else if (employee_name) {
+        userFilter = ` WHERE u.name ILIKE $${queryParams.length + 1}`;
+        queryParams.push(`%${employee_name}%`);
+        const userDetails = await pool.query('SELECT employee_id FROM users WHERE name ILIKE $1', [`%${employee_name}%`]);
+        userNameForHeader = employee_name;
+        empIdForHeader = userDetails.rows[0]?.employee_id || '';
     }
 
-    const attendanceResults = await pool.query(attendanceQuery, userId ? paramsWithUser : baseParams);
-    const leaveResults = await pool.query(leaveQuery, userId ? paramsWithUser : baseParams);
-    const holidayResults = await pool.query(holidayQuery, baseParams);
+    query += userFilter + ` ORDER BY u.name, g.date ASC;`;
 
-    const attendanceMap = new Map(); // date -> { check_in, check_out, status }
-    attendanceResults.rows.forEach(row => {
-      attendanceMap.set(moment(row.date).tz('Asia/Kolkata').format('YYYY-MM-DD'), row);
-    });
+    try {
+        const result = await pool.query(query, queryParams);
+        let csvContent = "Date,Day of Week,Status,Check-in,Check-out,Leave Reason,Holiday Name\n";
 
-    const leaveDaysMap = new Map(); // date -> { reason }
-    leaveResults.rows.forEach(leave => {
-      let currentDay = moment(leave.from_date).tz('Asia/Kolkata');
-      const toDate = moment(leave.to_date).tz('Asia/Kolkata');
-      while (currentDay.isSameOrBefore(toDate)) {
-        if (currentDay.isBetween(startDate, endDate, null, '[]')) {
-          leaveDaysMap.set(currentDay.format('YYYY-MM-DD'), leave.reason);
+        // Group by user if no specific user filter was applied for the CSV content itself
+        const groupedResults = employee_id || employee_name
+            ? { 'single_user': result.rows }
+            : result.rows.reduce((acc, row) => {
+                const key = `${row.employee_name} (${row.employee_id})`;
+                if (!acc[key]) {
+                    acc[key] = [];
+                }
+                acc[key].push(row);
+                return acc;
+            }, {});
+
+        if (employee_id || employee_name) {
+            // If a specific employee was selected, use their name for the header
+            const headerName = userNameForHeader || employee_name || 'Selected Employee';
+            const headerId = empIdForHeader || employee_id || 'N/A';
+            csvContent = `Employee Name: ${headerName} (ID: ${headerId})\nMonth: ${moment.tz([parseInt(year), parseInt(month) - 1, 1], 'Asia/Kolkata').format('MMMMEEEE')}\n\n`;
+            csvContent += "Date,Day of Week,Status,Check-in,Check-out,Leave Reason,Holiday Name\n";
+
+            for (let currentDay = startDate.clone(); currentDay.isSameOrBefore(endDate); currentDay.add(1, 'day')) {
+                const dateFormatted = currentDay.format('YYYY-MM-DD');
+                const dayOfWeek = currentDay.format('dddd');
+                let status = 'Absent';
+                let checkIn = 'N/A';
+                let checkOut = 'N/A';
+                let leaveReason = '';
+                let holidayName = '';
+
+                const att = result.rows.find(row => moment(row.attendance_date).tz('Asia/Kolkata').format('YYYY-MM-DD') === dateFormatted);
+
+                if (att) {
+                    status = att.status;
+                    checkIn = att.check_in ? moment(att.check_in, 'HH:mm:ss').format('hh:mm A') : '';
+                    checkOut = att.check_out ? moment(att.check_out, 'HH:mm:ss').format('hh:mm A') : '';
+                    leaveReason = att.leave_reason || '';
+                    holidayName = att.holiday_name || '';
+                } else {
+                    // Check for holidays or leaves if no attendance record
+                    const holiday = (await pool.query('SELECT name FROM holidays WHERE date = $1', [dateFormatted])).rows[0];
+                    if (holiday) {
+                        status = 'Holiday';
+                        holidayName = holiday.name;
+                    }
+
+                    const leave = (await pool.query('SELECT reason FROM leaves WHERE user_id = $1 AND $2 BETWEEN from_date AND to_date AND status = $3', [queryParams[2] || '', dateFormatted, 'approved'])).rows[0];
+                    if (leave) {
+                        status = 'On Leave';
+                        leaveReason = leave.reason;
+                    }
+                }
+                if (status === 'Absent' && (currentDay.day() === 0 || currentDay.day() === 6)) { // Sunday or Saturday
+                  status = 'Weekly Off';
+                }
+
+                csvContent += `${dateFormatted},${dayOfWeek},${status},"${checkIn}","${checkOut}","${leaveReason}","${holidayName}"\n`;
+            }
+
+        } else {
+            // Original logic for all employees, grouped by employee in CSV
+            for (const userKey in groupedResults) {
+                csvContent += `\nEmployee Name: ${userKey}\n`;
+                csvContent += "Date,Day of Week,Status,Check-in,Check-out,Leave Reason,Holiday Name\n";
+                const userRows = groupedResults[userKey];
+
+                const userShiftResult = await pool.query('SELECT shift_type FROM users WHERE name = $1 AND employee_id = $2', [userRows[0].employee_name, userRows[0].employee_id]);
+                const userShiftType = userShiftResult.rows[0]?.shift_type || 'day'; // Default to day if not found
+
+                for (let currentDay = startDate.clone(); currentDay.isSameOrBefore(endDate); currentDay.add(1, 'day')) {
+                    const dateFormatted = currentDay.format('YYYY-MM-DD');
+                    const dayOfWeek = currentDay.format('dddd');
+                    let status = 'Absent';
+                    let checkIn = 'N/A';
+                    let checkOut = 'N/A';
+                    let leaveReason = '';
+                    let holidayName = '';
+
+                    const att = userRows.find(row => moment(row.attendance_date).tz('Asia/Kolkata').format('YYYY-MM-DD') === dateFormatted);
+
+                    if (att) {
+                        status = att.status;
+                        checkIn = att.check_in ? moment(att.check_in, 'HH:mm:ss').format('hh:mm A') : '';
+                        checkOut = att.check_out ? moment(att.check_out, 'HH:mm:ss').format('hh:mm A') : '';
+                        leaveReason = att.leave_reason || '';
+                        holidayName = att.holiday_name || '';
+                    } else {
+                        // Check for holidays or leaves if no attendance record for this user on this day
+                        const holiday = (await pool.query('SELECT name FROM holidays WHERE date = $1', [dateFormatted])).rows[0];
+                        if (holiday) {
+                            status = 'Holiday';
+                            holidayName = holiday.name;
+                        }
+                        const leave = (await pool.query('SELECT reason FROM leaves WHERE user_id = $1 AND $2 BETWEEN from_date AND to_date AND status = $3', [userRows[0].user_id, dateFormatted, 'approved'])).rows[0];
+                        if (leave) {
+                            status = 'On Leave';
+                            leaveReason = leave.reason;
+                        }
+                    }
+
+                    if (status === 'Absent' && (currentDay.day() === 0 || currentDay.day() === 6)) { // Sunday or Saturday
+                      status = 'Weekly Off';
+                    }
+
+                    csvContent += `${dateFormatted},${dayOfWeek},${status},"${checkIn}","${checkOut}","${leaveReason}","${holidayName}"\n`;
+                }
+            }
         }
-        currentDay.add(1, 'day');
-      }
-    });
+        res.header('Content-Type', 'text/csv');
+        const filenameSuffix = employee_id ? `${userNameForHeader.replace(/\s/g, '_')}_${empIdForHeader || ''}` : 'AllEmployees';
+        res.attachment(`attendance_report_${filenameSuffix}_${year}_${month}.csv`);
+        return res.send(csvContent);
 
-    const holidaysMap = new Map(); // date -> name
-    holidayResults.rows.forEach(holiday => {
-      holidaysMap.set(moment(holiday.date).tz('Asia/Kolkata').format('YYYY-MM-DD'), holiday.name);
-    });
-
-    let csvContent = `Date,Day of Week,Status,Check-in Time,Check-out Time,Leave Reason,Holiday Name\n`;
-
-    let currentDay = startDate.clone();
-    while (currentDay.isSameOrBefore(endDate)) {
-      const dateFormatted = currentDay.format('YYYY-MM-DD');
-      const dayOfWeek = currentDay.format('dddd');
-      let status = 'Absent';
-      let checkIn = '';
-      let checkOut = '';
-      let leaveReason = '';
-      let holidayName = '';
-
-      if (holidaysMap.has(dateFormatted)) {
-        status = 'Holiday';
-        holidayName = holidaysMap.get(dateFormatted);
-      } else if (leaveDaysMap.has(dateFormatted)) {
-        status = 'On Leave';
-        leaveReason = leaveDaysMap.get(dateFormatted);
-      } else if (attendanceMap.has(dateFormatted)) {
-        const att = attendanceMap.get(dateFormatted);
-        status = String(att.status || 'unknown') === 'present' ? 'Present' : (String(att.status || 'unknown') === 'late' ? 'Late' : 'Other');
-        checkIn = att.check_in ? moment(att.check_in, 'HH:mm:ss').format('hh:mm A') : '';
-        checkOut = att.check_out ? moment(att.check_out, 'HH:mm:ss').format('hh:mm A') : '';
-      }
-
-      csvContent += `${dateFormatted},${dayOfWeek},${status},"${checkIn}","${checkOut}","${leaveReason}","${holidayName}"\n`;
-      currentDay.add(1, 'day');
+    } catch (err) {
+        console.error('Error exporting attendance data:', err);
+        res.status(500).json({ message: 'Server error exporting attendance data.' });
     }
+});
 
-    // Add a header row for the employee name if a specific employee was selected
-    let header = '';
-    if (userId) {
-      header = `Employee Name: ${userNameForHeader} (ID: ${empIdForHeader || 'N/A'})\nMonth: ${moment.tz([parseInt(year), parseInt(month) - 1, 1], 'Asia/Kolkata').format('MMMM Westeros')}\n\n`;
-    } else {
-      header = `Attendance Report for All Employees\nMonth: ${moment.tz([parseInt(year), parseInt(month) - 1, 1], 'Asia/Kolkata').format('MMMM Westeros')}\n\n`;
+// Fetch holidays
+app.get('/holidays', authenticate, async (req, res) => {
+    try {
+        const result = await pool.query('SELECT id, date, name FROM holidays ORDER BY date ASC');
+        res.status(200).json(result.rows);
+    } catch (err) {
+        console.error('Error fetching holidays:', err);
+        res.status(500).json({ message: 'Server error fetching holidays.' });
     }
-    csvContent = header + csvContent;
-
-    res.header('Content-Type', 'text/csv');
-    // Ensure filename is safe and uses correct employee name/id if filtered
-    const filenameSuffix = userId ? `${userNameForHeader.replace(/\s/g, '_')}_${empIdForHeader || ''}` : 'AllEmployees';
-    res.attachment(`attendance_report_${filenameSuffix}_${year}_${month}.csv`);
-    return res.send(csvContent);
-
-  } catch (error) {
-    console.error('Export attendance error:', error);
-    res.status(500).json({ message: 'Server error exporting attendance data.' });
-  }
 });
 
 
-// Start the server
+// Add a holiday (Admin only)
+app.post('/admin/holidays', authenticate, authorizeAdmin, async (req, res) => {
+    const { date, name } = req.body;
+    if (!date || !name) {
+        return res.status(400).json({ message: 'Date and name are required.' });
+    }
+    try {
+        const result = await pool.query(
+            'INSERT INTO holidays (date, name) VALUES ($1, $2) RETURNING *',
+            [date, name]
+        );
+        res.status(201).json({ message: 'Holiday added successfully.', holiday: result.rows[0] });
+    } catch (err) {
+        console.error('Error adding holiday:', err);
+        res.status(500).json({ message: 'Server error adding holiday.' });
+    }
+});
+
+// Delete a holiday (Admin only)
+app.delete('/admin/holidays/:id', authenticate, authorizeAdmin, async (req, res) => {
+    const { id } = req.params;
+    try {
+        const result = await pool.query('DELETE FROM holidays WHERE id = $1 RETURNING id', [id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: 'Holiday not found.' });
+        }
+        res.status(200).json({ message: 'Holiday deleted successfully.', deletedId: id });
+    } catch (err) {
+        console.error('Error deleting holiday:', err);
+        res.status(500).json({ message: 'Server error deleting holiday.' });
+    }
+});
+
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+    console.error('Unhandled error:', err.stack);
+    res.status(500).send('Something broke!');
+});
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
