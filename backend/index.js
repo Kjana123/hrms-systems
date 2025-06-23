@@ -283,7 +283,7 @@ app.get('/attendance/corrections', authenticate, async (req, res) => {
     }
 
     const result = await pool.query(
-      'SELECT * FROM corrections ORDER BY created_at DESC' // Changed to 'corrections'
+      'SELECT * FROM corrections ORDER BY created_at DESC'
     );
 
     res.json(result.rows);
@@ -313,7 +313,7 @@ app.post('/attendance/correction-request', authenticate, async (req, res) => {
     }
 
     const result = await pool.query(
-      'INSERT INTO corrections (user_id, user_name, employee_id, date, reason, status) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *', // Changed to 'corrections'
+      'INSERT INTO corrections (user_id, user_name, employee_id, date, reason, status) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
       [userId, userName, employeeId, date, reason, 'pending']
     );
     res.status(201).json({ message: 'Correction request submitted successfully!', data: result.rows[0] });
@@ -458,6 +458,31 @@ app.get('/holidays', authenticate, async (req, res) => {
 
 // Admin Controller Routes (using adminController for now, but extending functionality here)
 
+// Admin: Register a new employee (only for admins)
+app.post('/admin/register-employee', authenticate, authorizeAdmin, async (req, res) => {
+  try {
+    const { name, email, password, employee_id, role, shift_type } = req.body;
+
+    if (!name || !email || !password || !employee_id || !role || !shift_type) {
+      return res.status(400).json({ message: 'All fields are required.' });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const result = await pool.query(
+      'INSERT INTO users (name, email, password_hash, employee_id, role, shift_type) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, name, email, employee_id, role, shift_type',
+      [name, email, hashedPassword, employee_id, role, shift_type]
+    );
+    res.status(201).json({ message: 'Employee registered successfully', user: result.rows[0] });
+  } catch (error) {
+    console.error('Admin registration error:', error);
+    if (error.code === '23505') { // Unique violation code for PostgreSQL
+      return res.status(409).json({ message: 'Employee ID or Email already exists.' });
+    }
+    res.status(500).json({ message: 'Server error during employee registration.' });
+  }
+});
+
+
 // Admin: Get all correction requests
 app.get('/admin/attendance/corrections', authenticate, authorizeAdmin, async (req, res) => {
   try {
@@ -506,17 +531,17 @@ app.post('/admin/attendance/correction-review', authenticate, authorizeAdmin, as
       const userShiftType = userResult.rows[0].shift_type;
 
       // Construct time strings in HH:mm:ss format for check_in and check_out
-      const correctedDateMoment = moment.tz(date, 'YYYY-MM-DD', 'Asia/Kolkata');
+      const correctedDateMoment = moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
 
       let defaultCheckIn;
       let defaultCheckOut;
 
       if (userShiftType === 'evening') {
-        defaultCheckIn = correctedDateMoment.clone().hour(21).minute(0).second(0).format('HH:mm:ss'); // 9 PM IST
-        defaultCheckOut = correctedDateMoment.clone().add(1, 'day').hour(5).minute(0).second(0).format('HH:mm:ss'); // 5 AM IST next day
+        defaultCheckIn = moment(correctedDateMoment).hour(21).minute(0).second(0).format('HH:mm:ss'); // 9 PM IST
+        defaultCheckOut = moment(correctedDateMoment).add(1, 'day').hour(5).minute(0).second(0).format('HH:mm:ss'); // 5 AM IST next day
       } else {
-        defaultCheckIn = correctedDateMoment.clone().hour(9).minute(0).second(0).format('HH:mm:ss'); // 9 AM IST
-        defaultCheckOut = correctedDateMoment.clone().hour(17).minute(0).second(0).format('HH:mm:ss'); // 5 PM IST
+        defaultCheckIn = moment(correctedDateMoment).hour(9).minute(0).second(0).format('HH:mm:ss'); // 9 AM IST
+        defaultCheckOut = moment(correctedDateMoment).hour(17).minute(0).second(0).format('HH:mm:ss'); // 5 PM IST
       }
 
       await pool.query(
@@ -900,6 +925,44 @@ app.get('/admin/attendance/export', authenticate, authorizeAdmin, async (req, re
   } catch (error) {
     console.error('Export attendance error:', error);
     res.status(500).json({ message: 'Server error exporting attendance data.' });
+  }
+});
+
+// Admin: Get total employee count
+app.get('/admin/employees/count', authenticate, authorizeAdmin, async (req, res) => {
+  try {
+    const totalEmployeesResult = await pool.query(`SELECT COUNT(*) AS total_employees FROM users WHERE role = 'employee'`);
+    const totalAdminsResult = await pool.query(`SELECT COUNT(*) AS total_admins FROM users WHERE role = 'admin'`);
+
+    res.json({
+      total_employees: parseInt(totalEmployeesResult.rows[0].total_employees, 10),
+      total_admins: parseInt(totalAdminsResult.rows[0].total_admins, 10)
+    });
+  } catch (error) {
+    console.error('Error fetching employee counts:', error);
+    res.status(500).json({ message: 'Server error fetching employee counts.' });
+  }
+});
+
+// Admin: Get pending leaves count
+app.get('/admin/leaves/pending-count', authenticate, authorizeAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(`SELECT COUNT(*) AS pending_leaves FROM leaves WHERE status = 'pending'`);
+    res.json({ pending_leaves: parseInt(result.rows[0].pending_leaves, 10) });
+  } catch (error) {
+    console.error('Error fetching pending leaves count:', error);
+    res.status(500).json({ message: 'Server error fetching pending leaves count.' });
+  }
+});
+
+// Admin: Get pending corrections count
+app.get('/admin/corrections/pending-count', authenticate, authorizeAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(`SELECT COUNT(*) AS pending_corrections FROM corrections WHERE status = 'pending'`);
+    res.json({ pending_corrections: parseInt(result.rows[0].pending_corrections, 10) });
+  } catch (error) {
+    console.error('Error fetching pending corrections count:', error);
+    res.status(500).json({ message: 'Server error fetching pending corrections count.' });
   }
 });
 
