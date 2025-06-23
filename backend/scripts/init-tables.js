@@ -19,8 +19,8 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS corrections (
   id SERIAL PRIMARY KEY,
   user_id INTEGER REFERENCES users(id),
-  user_name TEXT, // Added user_name column
-  employee_id TEXT, // Added employee_id column
+  user_name TEXT, -- Added user_name column
+  employee_id TEXT, -- Added employee_id column
   date DATE,
   reason TEXT,
   status TEXT,
