@@ -3195,17 +3195,17 @@ app.get('/api/admin/profile-update-requests', authenticate, authorizeAdmin, asyn
     try {
         client = await pool.connect();
         const result = await client.query(`
-            SELECT 
-                pur.*, 
-                u.full_name AS user_full_name,
-                u.email AS user_email,
-                u.employee_id AS user_employee_id
-            FROM 
-                profile_update_requests pur
-            JOIN 
-                users u ON pur.user_id = u.id
-            ORDER BY 
-                pur.requested_at DESC;
+            SELECT
+    pur.*,
+    u.name AS user_full_name, -- Use the actual column name here (e.g., u.name)
+    u.email AS user_email,
+    u.employee_id AS user_employee_id
+FROM
+    profile_update_requests pur
+JOIN
+    users u ON pur.user_id = u.id
+ORDER BY
+    pur.requested_at DESC;
         `); // Fetch all requests, you might want to filter by status 'pending' here
         res.status(200).json(result.rows); // Send the data as JSON
     } catch (error) {
