@@ -65,7 +65,8 @@ app.use(cors({
   credentials: true,
 }));
 
-
+// Serve static profile photos
+app.use('/uploads/profile_photos', express.static('uploads/profile_photos'));
 
 // Configure nodemailer transporter
 const transporter = nodemailer.createTransport({
@@ -2047,7 +2048,7 @@ app.get('/api/admin/corrections', authenticate, authorizeAdmin, async (req, res)
       SELECT ac.*, u.name as user_name, u.employee_id
       FROM corrections ac
       JOIN users u ON ac.user_id = u.id
-    `;
+    `
     const params = [];
     const conditions = [];
     if (status) {
@@ -3293,47 +3294,6 @@ app.post('/api/admin/profile-update-requests/:requestId/reject', authenticate, a
         console.error('Backend: Error in /api/admin/profile-update-requests/:requestId/reject POST route:', error.message, error.stack);
         if (!res.headersSent) {
             res.status(500).json({ message: `Server error rejecting profile update request: ${error.message}` });
-        }
-    } finally {
-        if (client) {
-            client.release();
-        }
-    }
-});
-
-// NEW ADMIN ENDPOINT: Get all pending profile update requests
-app.get('/api/admin/profile-update-requests', authenticate, authorizeAdmin, async (req, res) => {
-    let client = null;
-    try {
-        client = await pool.connect();
-
-        const query = `
-            SELECT
-                pur.id,
-                pur.user_id,
-                u.name AS user_name,
-                u.email AS user_email,
-                pur.requested_data,
-                pur.status,
-                pur.requested_at
-            FROM
-                profile_update_requests pur
-            JOIN
-                users u ON pur.user_id = u.id
-            WHERE
-                pur.status = 'pending'
-            ORDER BY
-                pur.requested_at ASC;
-        `;
-        const result = await client.query(query);
-
-        console.log(`Backend: Fetched ${result.rows.length} pending profile update requests.`);
-        res.status(200).json(result.rows);
-
-    } catch (error) {
-        console.error('Backend: Error in /api/admin/profile-update-requests GET route:', error.message, error.stack);
-        if (!res.headersSent) {
-            res.status(500).json({ message: `Server error fetching profile update requests: ${error.message}` });
         }
     } finally {
         if (client) {
