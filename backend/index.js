@@ -65,12 +65,7 @@ app.use(cors({
   credentials: true,
 }));
 
-// Serve static profile photos
-app.use('/uploads/profile_photos', express.static('uploads/profile_photos'));
-app.use(express.static(path.join(__dirname, 'public')));
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
+
 
 // Configure nodemailer transporter
 const transporter = nodemailer.createTransport({
