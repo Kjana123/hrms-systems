@@ -3189,6 +3189,37 @@ app.post('/api/profile-update-requests', authenticate, async (req, res) => {
     }
 });
 
+// NEW ADMIN ENDPOINT: Get all pending profile update requests for admin review
+app.get('/api/admin/profile-update-requests', authenticate, authorizeAdmin, async (req, res) => {
+    let client = null;
+    try {
+        client = await pool.connect();
+        const result = await client.query(`
+            SELECT 
+                pur.*, 
+                u.full_name AS user_full_name,
+                u.email AS user_email,
+                u.employee_id AS user_employee_id
+            FROM 
+                profile_update_requests pur
+            JOIN 
+                users u ON pur.user_id = u.id
+            ORDER BY 
+                pur.requested_at DESC;
+        `); // Fetch all requests, you might want to filter by status 'pending' here
+        res.status(200).json(result.rows); // Send the data as JSON
+    } catch (error) {
+        console.error('Backend: Error in /api/admin/profile-update-requests GET route:', error.message, error.stack);
+        if (!res.headersSent) {
+            res.status(500).json({ message: `Server error fetching profile update requests: ${error.message}` });
+        }
+    } finally {
+        if (client) {
+            client.release();
+        }
+    }
+});
+
 // NEW ADMIN ENDPOINT: Approve a profile update request
 app.post('/api/admin/profile-update-requests/:requestId/approve', authenticate, authorizeAdmin, async (req, res) => {
     const { requestId } = req.params;
@@ -3359,6 +3390,7 @@ app.post('/admin/leaves/update-cancellation', authenticate, authorizeAdmin, asyn
 
 app.get('*', (req, res, next) => {
   try {
+
     res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
   } catch (err) {
     console.error("💥 Error in wildcard fallback route:", err);
