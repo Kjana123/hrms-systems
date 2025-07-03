@@ -11,6 +11,7 @@ const pool = new Pool({
 
 pool.on('connect', () => {
   console.log('Connected to the database');
+   console.log('DATABASE_URL being used:', process.env.DATABASE_URL ? '***URL_IS_PRESENT_AND_HIDDEN_FOR_SECURITY***' : 'DATABASE_URL environment variable is NOT set.');
 });
 
 pool.on('error', (err) => {

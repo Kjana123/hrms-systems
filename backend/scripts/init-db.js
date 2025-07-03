@@ -7,12 +7,11 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false },
 });
 
-// Changed 'password' to 'password_hash' here
 const createUsersTable = `
 CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
   email TEXT UNIQUE NOT NULL,
-  password_hash TEXT NOT NULL,
+  password TEXT NOT NULL,
   name TEXT,
   employee_id TEXT UNIQUE NOT NULL,
   role TEXT DEFAULT 'employee',
@@ -22,9 +21,8 @@ CREATE TABLE IF NOT EXISTS users (
 );
 `;
 
-// Changed 'password' to 'password_hash' here
 const insertTestUser = `
-INSERT INTO users (email, password_hash, name, employee_id, role, shift_type)
+INSERT INTO users (email, password, name, employee_id, role, shift_type)
 VALUES (
   'test@example.com',
   '$2b$10$eAScQSdf/WEwxscRjtowFehMo9ltFmP4xTdraFtFQnveaP4UWJSCa', -- bcrypt hashed "password"
@@ -33,9 +31,9 @@ VALUES (
   'admin',      -- optional: make this a test admin
   'day'         -- shift_type default
 )
-ON CONFLICT (email)
-DO UPDATE SET
-  password_hash = EXCLUDED.password_hash,
+ON CONFLICT (email) 
+DO UPDATE SET 
+  password = EXCLUDED.password,
   name = EXCLUDED.name,
   employee_id = EXCLUDED.employee_id,
   role = EXCLUDED.role,
