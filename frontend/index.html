@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HRMS Attendance Dashboard</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts - Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Moment.js for date handling -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
+    <!-- Moment-timezone for timezone support -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment-timezone/0.5.43/moment-timezone-with-data.min.js"></script>
+    <!-- Axios for HTTP requests -->
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <!-- jwt-decode for token decoding -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jwt-decode/3.1.2/jwt-decode.min.js"></script>
+    <!-- FileSaver.js for saving files -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <!-- React and ReactDOM CDNs -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel for JSX transformation in browser (for development only) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="./index.css">
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 font-inter transition-colors duration-300">
+    <div id="root"></div>
+
+    <!-- Load all React components with type="text/babel" -->
+    <!-- CRITICAL ORDER: Load components from deepest child to main parent (App.js) -->
+
+    <!-- Core UI component (used by App.js and others) -->
+    <script type="text/babel" src="./src/Message.js"></script>
+
+    <!-- Employee Dashboard Sub-Components (used by EmployeeDashboard.js) -->
+    <script type="text/babel" src="./src/AttendanceCorrectionForm.js"></script>
+    <script type="text/babel" src="./src/LeaveApplicationForm.js"></script>
+    <script type="text/babel" src="./src/MyLeaves.js"></script>
+    <script type="text/babel" src="./src/LeaveBalances.js"></script>
+    <script type="text/babel" src="./src/Notifications.js"></script>
+    <script type="text/babel" src="./src/ProfileSettings.js"></script>
+
+
+    <!-- Admin Dashboard Sub-Components (used by AdminDashboard.js) -->
+    <script type="text/babel" src="./src/AdminLeaveManagement.js"></script>
+    <script type="text/babel" src="./src/HolidayManagement.js"></script>
+    <script type="text/babel" src="./src/WeeklyOffManagement.js"></script>
+    <script type="text/babel" src="./src/AdminNotifications.js"></script>
+    <script type="text/babel" src="./src/AdminAnalyticsReports.js"></script>
+    <script type="text/babel" src="./src/AdminCorrectionReview.js"></script>
+    <script type="text/babel" src="./src/AdminProfileRequests.js"></script>
+
+    <!-- Main Dashboard Components (used by App.js) -->
+    <script type="text/babel" src="./src/AuthForms.js"></script>
+    <script type="text/babel" src="./src/EmployeeDashboard.js"></script>
+    <script type="text/babel" src="./src/AdminDashboard.js"></script>
+
+
+    <!-- Main Application Entry Point (must be loaded LAST) -->
+    <script type="text/babel" src="./App.js"></script>
+</body>
+</html>

@@ -1,0 +1,158 @@
+// HolidayManagement.js
+// This component will be used within AdminDashboard.js
+// REMOVE all local import/export statements when using type="text/babel" in index.html
+
+const HolidayManagement = ({ showMessage, apiBaseUrl, accessToken }) => {
+    const [holidays, setHolidays] = React.useState([]);
+    const [loading, setLoading] = React.useState(true);
+    const [newHolidayDate, setNewHolidayDate] = React.useState('');
+    const [newHolidayName, setNewHolidayName] = React.useState('');
+
+    // Axios instance with token for authenticated requests
+    const authAxios = axios.create({
+        baseURL: apiBaseUrl,
+        headers: {
+            Authorization: `Bearer ${accessToken}`
+        }
+    });
+
+    const fetchHolidays = async () => {
+        try {
+            const response = await authAxios.get(`${apiBaseUrl}/api/admin/holidays`);
+            setHolidays(response.data);
+        } catch (error) {
+            console.error("Error fetching holidays:", error.response?.data?.message || error.message);
+            showMessage(`Error fetching holidays: ${error.response?.data?.message || error.message}`, "error");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    React.useEffect(() => {
+        if (accessToken) {
+            fetchHolidays();
+        }
+    }, [accessToken]); // Re-fetch when accessToken changes
+
+    const handleAddHoliday = async (e) => {
+        e.preventDefault();
+        if (!newHolidayDate || !newHolidayName) {
+            showMessage('Please provide both date and name for the holiday.', 'error');
+            return;
+        }
+        try {
+            await authAxios.post(`${apiBaseUrl}/api/admin/holidays`, {
+                date: newHolidayDate,
+                name: newHolidayName
+            });
+            showMessage('Holiday added successfully!', 'success');
+            setNewHolidayDate('');
+            setNewHolidayName('');
+            fetchHolidays(); // Re-fetch to update the list
+        } catch (error) {
+            console.error("Error adding holiday:", error.response?.data?.message || error.message);
+            showMessage(`Failed to add holiday: ${error.response?.data?.message || error.message}`, 'error');
+        }
+    };
+
+    const handleDeleteHoliday = async (holidayId) => {
+        if (window.confirm('Are you sure you want to delete this holiday?')) {
+            try {
+                await authAxios.delete(`${apiBaseUrl}/api/admin/holidays/${holidayId}`);
+                showMessage('Holiday deleted successfully!', 'success');
+                fetchHolidays(); // Re-fetch to update the list
+            } catch (error) {
+                console.error("Error deleting holiday:", error.response?.data?.message || error.message);
+                showMessage(`Failed to delete holiday: ${error.response?.data?.message || error.message}`, "error");
+            }
+        }
+    };
+
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center p-8">
+                <div className="w-4 h-4 rounded-full animate-pulse bg-blue-600"></div>
+                <div className="w-4 h-4 rounded-full animate-pulse bg-blue-600"></div>
+                <div className="w-4 h-4 rounded-full animate-pulse bg-blue-600"></div>
+                <p className="ml-2">Loading holidays...</p>
+            </div>
+        );
+    }
+
+    return (
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-colors duration-300">
+            <h2 className="text-2xl font-semibold mb-6">Manage Holidays</h2>
+
+            {/* Add New Holiday Form */}
+            <form onSubmit={handleAddHoliday} className="space-y-4 mb-8 p-4 border border-gray-200 dark:border-gray-700 rounded-md bg-gray-50 dark:bg-gray-700">
+                <h3 className="text-lg font-medium mb-4">Add New Holiday</h3>
+                <div>
+                    <label htmlFor="newHolidayDate" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Date</label>
+                    <input
+                        type="date"
+                        id="newHolidayDate"
+                        className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                        value={newHolidayDate}
+                        onChange={(e) => setNewHolidayDate(e.target.value)}
+                        required
+                    />
+                </div>
+                <div>
+                    <label htmlFor="newHolidayName" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Holiday Name</label>
+                    <input
+                        type="text"
+                        id="newHolidayName"
+                        className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                        placeholder="e.g., Christmas Day"
+                        value={newHolidayName}
+                        onChange={(e) => setNewHolidayName(e.target.value)}
+                        required
+                    />
+                </div>
+                <button
+                    type="submit"
+                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200 shadow-md"
+                >
+                    Add Holiday
+                </button>
+            </form>
+
+            {/* Existing Holidays List */}
+            <h3 className="text-xl font-semibold mb-4">Existing Holidays</h3>
+            <div className="overflow-x-auto rounded-lg shadow-md">
+                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                    <thead className="bg-gray-50 dark:bg-gray-700">
+                        <tr>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Date</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Holiday Name</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                        {holidays.length > 0 ? (
+                            holidays.map(holiday => (
+                                <tr key={holiday.id} className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-150">
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{holiday.date}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{holiday.name}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                        <button
+                                            onClick={() => handleDeleteHoliday(holiday.id)}
+                                            className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300"
+                                        >
+                                            Delete
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))
+                        ) : (
+                            <tr>
+                                <td colSpan="3" className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">No holidays added yet.</td>
+                            </tr>
+                        )}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+};
+
