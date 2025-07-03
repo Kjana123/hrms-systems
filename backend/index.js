@@ -1,3 +1,4 @@
+
 require('dotenv').config(); // Load environment variables
 
 const express = require('express');
@@ -67,6 +68,12 @@ app.use(cors({
 
 // Serve static profile photos
 app.use('/uploads/profile_photos', express.static('uploads/profile_photos'));
+// Serve static files from dist
+app.use(express.static(path.join(__dirname, '../frontend/dist')));
+
+// Fallback for client-side routing
+
+
 
 // Configure nodemailer transporter
 const transporter = nodemailer.createTransport({
@@ -3350,6 +3357,14 @@ app.post('/admin/leaves/update-cancellation', authenticate, authorizeAdmin, asyn
   res.redirect(307, `/api/admin/leaves/${id}/status`);
 });
 
+app.get('*', (req, res, next) => {
+  try {
+    res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
+  } catch (err) {
+    console.error("💥 Error in wildcard fallback route:", err);
+    next(err);
+  }
+});
 
 // Error Handling Middleware
 app.use((err, req, res, next) => {
@@ -3359,6 +3374,8 @@ app.use((err, req, res, next) => {
   }
   res.status(500).json({ message: 'Internal server error.' });
 });
+
+
 
 // Start Server
 const PORT = process.env.PORT || 3001;
