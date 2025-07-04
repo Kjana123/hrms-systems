@@ -2755,8 +2755,14 @@ app.get('/api/admin/export-attendance', authenticate, authorizeAdmin, async (req
 
 app.post('/admin/attendance/mark-absent-forgotten-checkout', authenticate, authorizeAdmin, async (req, res) => {
   try {
-    const { date, userId } = req.body; // Added userId to allow marking specific user
+    const { date, userId } = req.body;
     const targetDate = date || moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
+
+    console.log('--- DEBUGGING mark-absent-forgotten-checkout ---');
+    console.log('Received date (req.body.date):', date);
+    console.log('Received userId (req.body.userId):', userId);
+    console.log('Constructed targetDate:', targetDate, ' (Type:', typeof targetDate, ')');
+    console.log('UserId being pushed to params:', userId, ' (Type:', typeof userId, ')');
 
     let queryText = `
       UPDATE attendance
@@ -2765,16 +2771,26 @@ app.post('/admin/attendance/mark-absent-forgotten-checkout', authenticate, autho
         AND check_in IS NOT NULL
         AND check_out IS NULL
         AND status NOT IN ('on_leave', 'lop', 'half-day')
-      RETURNING user_id, date, status
-    `;
+    `; // Removed RETURNING here initially
+
     const queryParams = [targetDate];
 
     if (userId) {
+      // Append the user_id condition directly to the WHERE clause
       queryText += ` AND user_id = $2`;
       queryParams.push(userId);
     }
 
-    const result = await pool.query(queryText, queryParams);
+    // Add the RETURNING clause AFTER all WHERE conditions are built
+    queryText += ` RETURNING user_id, date, status`; // Add RETURNING here
+
+    console.log('Final queryText sent to DB:', queryText);
+    console.log('Final queryParams sent to DB:', queryParams);
+
+    const result = await pool.query(queryText, queryParams); // This is your line 2779
+
+    console.log('Notification successful, rows updated:', result.rows.length);
+    console.log('--- END DEBUGGING ---');
 
     for (const row of result.rows) {
       await pool.query(
