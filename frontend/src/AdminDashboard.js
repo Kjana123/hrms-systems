@@ -3,6 +3,8 @@
 // import { collection, query, onSnapshot, addDoc, updateDoc, deleteDoc, doc, where, getDocs } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
 
 const AdminDashboard = ({ user, handleLogout, darkMode, toggleDarkMode, showMessage, apiBaseUrl, accessToken }) => {
+     // Define the maximum number of users allowed
+    const MAX_ALLOWED_USERS = 10; // You can change this number as needed
     // State for managing employees, attendance records, and UI elements
     const [employees, setEmployees] = React.useState([]);
     const [attendanceRecords, setAttendanceRecords] = React.useState([]);
@@ -183,6 +185,16 @@ const AdminDashboard = ({ user, handleLogout, darkMode, toggleDarkMode, showMess
             }
         }
 
+        // --- START NEW MODIFICATION FOR USER LIMIT ---
+        // Check if adding a new employee and if the limit has been reached
+        if (!isEditingEmployee && employees.length >= MAX_ALLOWED_USERS) {
+            showMessage(`User limit of ${MAX_ALLOWED_USERS} reached. Cannot add more employees.`, 'error');
+            // Reset the form if the user tries to add when limit is reached
+            resetEmployeeForm();
+            return; // Stop the function execution
+        }
+        // --- END NEW MODIFICATION ---
+        
         const employeeData = {
             name: newEmployeeName,
             email: newEmployeeEmail,
@@ -672,96 +684,99 @@ const AdminDashboard = ({ user, handleLogout, darkMode, toggleDarkMode, showMess
                 )}
 
 
-                {/* Employee Management Tab */}
-                {activeTab === 'employees' && (
-                    <section className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md mb-8 transition-colors duration-300">
-                        <h2 className="text-2xl font-semibold mb-6">Manage Employees</h2>
+{/* Employee Management Tab */}
+{activeTab === 'employees' && (
+    <section className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md mb-8 transition-colors duration-300">
+        <h2 className="text-2xl font-semibold mb-6">Manage Employees</h2>
 
-                        {/* Add/Edit Employee Form */}
-                        <div className="mb-6">
-                            <button
-                                onClick={() => {
-                                    if (isAddingEmployee) { // If currently open, close and reset
-                                        resetEmployeeForm();
-                                    } else { // If currently closed, open for adding
-                                        setIsAddingEmployee(true);
-                                        setIsEditingEmployee(false); // Ensure not in editing mode when opening for add
-                                        setEditingEmployeeData(null);
-                                    }
-                                }}
-                                className="px-6 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200 shadow-md flex items-center"
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                                    <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
-                                </svg>
-                                {isAddingEmployee ? 'Cancel' : 'Add New Employee'}
-                            </button>
+        {/* Add/Edit Employee Form */}
+        <div className="mb-6">
+            {/* --- THIS IS WHERE YOU NEED TO ADD THE CONDITIONAL RENDERING --- */}
+            {employees.length < MAX_ALLOWED_USERS && ( // <--- ADD THIS LINE
+                <button
+                    onClick={() => {
+                        if (isAddingEmployee) { // If currently open, close and reset
+                            resetEmployeeForm();
+                        } else { // If currently closed, open for adding
+                            setIsAddingEmployee(true);
+                            setIsEditingEmployee(false); // Ensure not in editing mode when opening for add
+                            setEditingEmployeeData(null);
+                        }
+                    }}
+                    className="px-6 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200 shadow-md flex items-center"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
+                    </svg>
+                    {isAddingEmployee ? 'Cancel' : 'Add New Employee'}
+                </button>
+            )} {/* <--- ADD THIS CLOSING PARENTHESIS */}
 
-                            {isAddingEmployee && (
-                                <div className="mt-4 p-4 border border-gray-200 dark:border-gray-700 rounded-md bg-gray-50 dark:bg-gray-700">
-                                    <h3 className="text-lg font-medium mb-4">{isEditingEmployee ? 'Edit Employee Details' : 'New Employee Details'}</h3>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <input
-                                            type="text"
-                                            placeholder="Employee Name"
-                                            className="px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-blue-500 focus:border-blue-500"
-                                            value={newEmployeeName}
-                                            onChange={(e) => setNewEmployeeName(e.target.value)}
-                                            required
-                                        />
-                                        <input
-                                            type="email"
-                                            placeholder="Employee Email"
-                                            className="px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-blue-500 focus:border-blue-500"
-                                            value={newEmployeeEmail}
-                                            onChange={(e) => setNewEmployeeEmail(e.target.value)}
-                                            required
-                                        />
-                                        <input
-                                            type="text"
-                                            placeholder="Employee ID"
-                                            className="px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-blue-500 focus:border-blue-500"
-                                            value={newEmployeeId}
-                                            onChange={(e) => setNewEmployeeId(e.target.value)}
-                                            required
-                                        />
-                                        {/* Password field only required for new employee, optional for edit */}
-                                        <input
-                                            type="password"
-                                            placeholder={isEditingEmployee ? "New Password (Optional)" : "Password"}
-                                            className="px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-blue-500 focus:border-blue-500"
-                                            value={newEmployeePassword}
-                                            onChange={(e) => setNewEmployeePassword(e.target.value)}
-                                            required={!isEditingEmployee} // Required only if not editing
-                                        />
-                                        <select
-                                            className="px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-blue-500 focus:border-blue-500"
-                                            value={newEmployeeRole}
-                                            onChange={(e) => setNewEmployeeRole(e.target.value)}
-                                            required
-                                        >
-                                            <option value="employee">Employee</option>
-                                            <option value="admin">Admin</option>
-                                        </select>
-                                        <select
-                                            className="px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-blue-500 focus:border-blue-500"
-                                            value={newEmployeeShiftType}
-                                            onChange={(e) => setNewEmployeeShiftType(e.target.value)}
-                                            required
-                                        >
-                                            <option value="day">Day</option>
-                                            <option value="evening">Evening</option>
-                                        </select>
-                                    </div>
-                                    <button
-                                        onClick={handleSaveEmployee}
-                                        className="mt-4 px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200 shadow-md"
-                                    >
-                                        {isEditingEmployee ? 'Update Employee' : 'Save Employee'}
-                                    </button>
-                                </div>
-                            )}
-                        </div>
+            {isAddingEmployee && (
+                <div className="mt-4 p-4 border border-gray-200 dark:border-gray-700 rounded-md bg-gray-50 dark:bg-gray-700">
+                    <h3 className="text-lg font-medium mb-4">{isEditingEmployee ? 'Edit Employee Details' : 'New Employee Details'}</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <input
+                            type="text"
+                            placeholder="Employee Name"
+                            className="px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-blue-500 focus:border-blue-500"
+                            value={newEmployeeName}
+                            onChange={(e) => setNewEmployeeName(e.target.value)}
+                            required
+                        />
+                        <input
+                            type="email"
+                            placeholder="Employee Email"
+                            className="px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-blue-500 focus:border-blue-500"
+                            value={newEmployeeEmail}
+                            onChange={(e) => setNewEmployeeEmail(e.target.value)}
+                            required
+                        />
+                        <input
+                            type="text"
+                            placeholder="Employee ID"
+                            className="px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-blue-500 focus:border-blue-500"
+                            value={newEmployeeId}
+                            onChange={(e) => setNewEmployeeId(e.target.value)}
+                            required
+                        />
+                        {/* Password field only required for new employee, optional for edit */}
+                        <input
+                            type="password"
+                            placeholder={isEditingEmployee ? "New Password (Optional)" : "Password"}
+                            className="px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-blue-500 focus:border-blue-500"
+                            value={newEmployeePassword}
+                            onChange={(e) => setNewEmployeePassword(e.target.value)}
+                            required={!isEditingEmployee} // Required only if not editing
+                        />
+                        <select
+                            className="px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-blue-500 focus:border-blue-500"
+                            value={newEmployeeRole}
+                            onChange={(e) => setNewEmployeeRole(e.target.value)}
+                            required
+                        >
+                            <option value="employee">Employee</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                        <select
+                            className="px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-blue-500 focus:border-blue-500"
+                            value={newEmployeeShiftType}
+                            onChange={(e) => setNewEmployeeShiftType(e.target.value)}
+                            required
+                        >
+                            <option value="day">Day</option>
+                            <option value="evening">Evening</option>
+                        </select>
+                    </div>
+                    <button
+                        onClick={handleSaveEmployee}
+                        className="mt-4 px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200 shadow-md"
+                    >
+                        {isEditingEmployee ? 'Update Employee' : 'Save Employee'}
+                    </button>
+                </div>
+            )}
+        </div>
 
                         {/* Employee List Table */}
                         <div className="overflow-x-auto rounded-lg shadow-md">

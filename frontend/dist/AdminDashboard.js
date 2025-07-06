@@ -11,6 +11,8 @@ const AdminDashboard = ({
   apiBaseUrl,
   accessToken
 }) => {
+  // Define the maximum number of users allowed
+  const MAX_ALLOWED_USERS = 10; // You can change this number as needed
   // State for managing employees, attendance records, and UI elements
   const [employees, setEmployees] = React.useState([]);
   const [attendanceRecords, setAttendanceRecords] = React.useState([]);
@@ -178,6 +180,17 @@ const AdminDashboard = ({
         return;
       }
     }
+
+    // --- START NEW MODIFICATION FOR USER LIMIT ---
+    // Check if adding a new employee and if the limit has been reached
+    if (!isEditingEmployee && employees.length >= MAX_ALLOWED_USERS) {
+      showMessage(`User limit of ${MAX_ALLOWED_USERS} reached. Cannot add more employees.`, 'error');
+      // Reset the form if the user tries to add when limit is reached
+      resetEmployeeForm();
+      return; // Stop the function execution
+    }
+    // --- END NEW MODIFICATION ---
+
     const employeeData = {
       name: newEmployeeName,
       email: newEmployeeEmail,
@@ -651,7 +664,10 @@ const AdminDashboard = ({
     className: "text-2xl font-semibold mb-6"
   }, "Manage Employees"), /*#__PURE__*/React.createElement("div", {
     className: "mb-6"
-  }, /*#__PURE__*/React.createElement("button", {
+  }, employees.length < MAX_ALLOWED_USERS &&
+  /*#__PURE__*/
+  // <--- ADD THIS LINE
+  React.createElement("button", {
     onClick: () => {
       if (isAddingEmployee) {
         // If currently open, close and reset
@@ -673,7 +689,7 @@ const AdminDashboard = ({
     fillRule: "evenodd",
     d: "M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z",
     clipRule: "evenodd"
-  })), isAddingEmployee ? 'Cancel' : 'Add New Employee'), isAddingEmployee && /*#__PURE__*/React.createElement("div", {
+  })), isAddingEmployee ? 'Cancel' : 'Add New Employee'), " ", isAddingEmployee && /*#__PURE__*/React.createElement("div", {
     className: "mt-4 p-4 border border-gray-200 dark:border-gray-700 rounded-md bg-gray-50 dark:bg-gray-700"
   }, /*#__PURE__*/React.createElement("h3", {
     className: "text-lg font-medium mb-4"
