@@ -40,6 +40,7 @@ const EmployeeDashboard = ({
 
   // State for notifications
   const [unreadNotificationsCount, setUnreadNotificationsCount] = React.useState(0); // New state for unread notifications
+  const [allNotifications, setAllNotifications] = React.useState([]); // New state to hold all notifications
 
   // State for leave balances
   const [leaveBalances, setLeaveBalances] = React.useState([]); // New state for leave balances
@@ -147,16 +148,18 @@ const EmployeeDashboard = ({
   };
 
   // Function to fetch unread notifications count
-  const fetchUnreadNotificationsCount = async () => {
+  const fetchAllNotificationsAndCount = async () => {
     try {
-      const response = await authAxios.get(`${apiBaseUrl}/api/notifications/my`, {
-        params: {
-          unreadOnly: true
-        }
-      });
-      setUnreadNotificationsCount(response.data.length);
+      // Fetch ALL notifications for the user
+      const response = await authAxios.get(`${apiBaseUrl}/api/notifications/my`);
+      setAllNotifications(response.data); // Store the full list
+      // Calculate unread count from the full list
+      const currentUnreadCount = response.data.filter(n => !n.is_read).length;
+      setUnreadNotificationsCount(currentUnreadCount); // Update the unread count
     } catch (error) {
-      console.error("Error fetching unread notifications count:", error.response?.data?.message || error.message);
+      console.error("Error fetching notifications or count:", error.response?.data?.message || error.message);
+      setAllNotifications([]); // Clear on error
+      setUnreadNotificationsCount(0); // Set count to 0 on error
     }
   };
 
@@ -183,7 +186,7 @@ const EmployeeDashboard = ({
       console.log(`[EFFECT DEBUG] useEffect: Initial data fetch triggered.`);
       try {
         // Fetch all data concurrently
-        await Promise.all([fetchAttendanceToday(), fetchUnreadNotificationsCount(), fetchLeaveBalances()]);
+        await Promise.all([fetchAttendanceToday(), fetchAllNotificationsAndCount(), fetchLeaveBalances()]);
       } catch (error) {
         console.error(`[EFFECT ERROR] Initial dashboard data fetch failed:`, error);
       } finally {
@@ -290,7 +293,7 @@ const EmployeeDashboard = ({
       // Re-fetch my leaves and balances after application
       setActiveTab('my-leaves'); // Switch to my leaves tab
       await fetchAttendanceToday(); // Check if today's attendance status changes due to leave
-      await fetchUnreadNotificationsCount(); // New notification might be generated
+      await fetchAllNotificationsAndCount(); // New notification might be generated
       await fetchLeaveBalances(); // Refresh leave balances after applying
       await fetchMonthlyAnalytics(); // Leave application affects analytics
     } catch (error) {
@@ -311,7 +314,7 @@ const EmployeeDashboard = ({
       showMessage('Leave cancellation request submitted!', 'success');
       // MyLeaves component will re-fetch on its own
       await fetchAttendanceToday(); // Check if today's attendance status changes
-      await fetchUnreadNotificationsCount(); // New notification might be generated
+      await fetchAllNotificationsAndCount(); // New notification might be generated
       await fetchLeaveBalances(); // Refresh leave balances after cancellation request
       await fetchMonthlyAnalytics(); // Leave cancellation affects analytics
     } catch (error) {
@@ -328,7 +331,7 @@ const EmployeeDashboard = ({
       // Optionally, refresh attendance history or switch tab
       await fetchAttendanceHistory();
       await fetchAttendanceToday(); // Check if today's attendance status changes
-      await fetchUnreadNotificationsCount(); // New notification might be generated
+      await fetchAllNotificationsAndCount(); // New notification might be generated
       await fetchMonthlyAnalytics(); // Correction affects analytics
       setActiveTab('dashboard'); // Go back to dashboard to see updated attendance
     } catch (error) {
@@ -743,7 +746,10 @@ const EmployeeDashboard = ({
   }, "Notifications"), /*#__PURE__*/React.createElement(Notifications, {
     showMessage: showMessage,
     apiBaseUrl: apiBaseUrl,
-    accessToken: accessToken
+    accessToken: accessToken,
+    notifications: allNotifications // ADD THIS: Pass the full list of notifications
+    ,
+    onNotificationMarkedRead: fetchAllNotificationsAndCount // ADD THIS: Pass the callback function
   })), activeTab === 'profile' && /*#__PURE__*/React.createElement("section", {
     className: `p-6 rounded-lg shadow-md transition-colors duration-300 ${darkMode ? 'bg-gray-800' : 'bg-white'}`
   }, /*#__PURE__*/React.createElement("h2", {

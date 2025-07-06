@@ -1,9 +1,9 @@
 // Notifications.js
 // REMOVE all local import/export statements when using type="text/babel" in index.html
 
-const Notifications = ({ showMessage, apiBaseUrl, accessToken }) => {
-    const [notifications, setNotifications] = React.useState([]);
-    const [loadingNotifications, setLoadingNotifications] = React.useState(true);
+const Notifications = ({ showMessage, apiBaseUrl, accessToken, notifications, onNotificationMarkedRead }) => {
+    //const [notifications, setNotifications] = React.useState([]);
+    //const [loadingNotifications, setLoadingNotifications] = React.useState(true);
     const [filterUnread, setFilterUnread] = React.useState(false);
 
     // Axios instance with token for authenticated requests
@@ -14,42 +14,49 @@ const Notifications = ({ showMessage, apiBaseUrl, accessToken }) => {
         }
     });
 
-    const fetchNotifications = async () => {
-        try {
-            const response = await authAxios.get(`${apiBaseUrl}/api/notifications/my`, {
-                params: {
-                    unreadOnly: filterUnread
-                }
-            });
-            setNotifications(response.data);
-        } catch (error) {
-            console.error("Error fetching notifications:", error.response?.data?.message || error.message);
-            showMessage(`Error fetching notifications: ${error.response?.data?.message || error.message}`, "error");
-        } finally {
-            setLoadingNotifications(false);
-        }
-    };
+    //const fetchNotifications = async () => {
+      //  try {
+        //    const response = await authAxios.get(`${apiBaseUrl}/api/notifications/my`, {
+          //      params: {
+            //        unreadOnly: filterUnread
+              //  }
+            //});
+            //setNotifications(response.data);
+        //} catch (error) {
+          //  console.error("Error fetching notifications:", error.response?.data?.message || error.message);
+            //showMessage(`Error fetching notifications: ${error.response?.data?.message || error.message}`, "error");
+        //} finally {
+          //  setLoadingNotifications(false);
+       // }
+    //};
 
-    React.useEffect(() => {
-        if (accessToken) {
-            fetchNotifications();
-        }
-    }, [accessToken, filterUnread]); // Re-fetch when accessToken or filter changes
+    //React.useEffect(() => {
+        //if (accessToken) {
+          //  fetchNotifications();
+        //}
+    //}, [accessToken, filterUnread]); // Re-fetch when accessToken or filter changes
 
-    const markAsRead = async (notificationId) => {
+      const markAsRead = async (notificationId) => {
         try {
             await authAxios.put(`${apiBaseUrl}/api/notifications/${notificationId}/read`);
             showMessage('Notification marked as read!', 'success');
-            fetchNotifications(); // Re-fetch to update the list
+            // CRITICAL CHANGE: Call the callback from parent to re-fetch and update count
+            if (onNotificationMarkedRead) { // Ensure the prop exists before calling
+                onNotificationMarkedRead();
+            }
+            // You might also want to update the local 'notifications' prop list optimistically here
+            // or rely completely on the parent re-fetching. For simplicity, letting parent re-fetch.
         } catch (error) {
             console.error("Error marking notification as read:", error.response?.data?.message || error.message);
             showMessage(`Failed to mark notification as read: ${error.response?.data?.message || error.message}`, "error");
         }
     };
 
-    if (loadingNotifications) {
-        return <p className="text-gray-500 dark:text-gray-400">Loading your notifications...</p>;
-    }
+     const filteredNotifications = notifications.filter(n => filterUnread ? !n.is_read : true); // Filter the prop data
+
+    //if (loadingNotifications) {
+      //  return <p className="text-gray-500 dark:text-gray-400">Loading your notifications...</p>;
+    //}
 
     return (
         <div className="mt-8 p-4 border border-gray-200 dark:border-gray-700 rounded-md bg-gray-50 dark:bg-gray-700">
@@ -67,9 +74,9 @@ const Notifications = ({ showMessage, apiBaseUrl, accessToken }) => {
                 </label>
             </div>
 
-            {notifications.length > 0 ? (
+            {filteredNotifications.length > 0 ? ( // Use filteredNotifications here
                 <div className="space-y-4">
-                    {notifications.map(notification => (
+                    {filteredNotifications.map(notification => (
                         <div
                             key={notification.id}
                             className={`p-4 rounded-lg shadow-sm ${
@@ -81,7 +88,7 @@ const Notifications = ({ showMessage, apiBaseUrl, accessToken }) => {
                             <div>
                                 <p className="text-sm">{notification.message}</p>
                                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                    {moment(notification.created_at).format('MMM D, YYYY h:mm A')}
+                                    {moment(notification.created_at).format('MMM D, YYYY h:mm A')} {/* Fixed format string */}
                                 </p>
                             </div>
                             {!notification.is_read && (
@@ -102,3 +109,4 @@ const Notifications = ({ showMessage, apiBaseUrl, accessToken }) => {
     );
 };
 
+window.Notifications = Notifications;
