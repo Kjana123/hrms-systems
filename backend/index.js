@@ -1476,6 +1476,11 @@ app.delete('/admin/users/:id', authenticate, authorizeAdmin, async (req, res) =>
     await client.query('DELETE FROM notifications WHERE user_id = $1', [id]);
     await client.query('DELETE FROM weekly_offs WHERE user_id = $1', [id]); // Delete weekly offs
 
+    // --- ADD THESE LINES TO ADDRESS THE FOREIGN KEY CONSTRAINT AND FOR COMPLETENESS ---
+    await client.query('DELETE FROM profile_update_requests WHERE user_id = $1', [id]);
+    await client.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [id]);
+    // ----------------------------------------------------------------------------------
+
     const result = await client.query('DELETE FROM users WHERE id = $1 RETURNING id, profile_photo', [id]);
     if (result.rows.length === 0) {
       await client.query('ROLLBACK');
