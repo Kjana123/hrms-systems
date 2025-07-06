@@ -1339,3 +1339,5 @@ const AdminDashboard = ({ user, handleLogout, darkMode, toggleDarkMode, showMess
         </div>
     );
 };
+
+window.AdminDashboard = AdminDashboard;
