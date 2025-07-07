@@ -19,6 +19,28 @@ const WeeklyOffManagement = ({ showMessage, apiBaseUrl, accessToken }) => {
         }
     });
 
+    // Helper to map day name to day number (0 for Sunday, 1 for Monday, ..., 6 for Saturday)
+    const dayNameToNumber = {
+        'Sunday': 0,
+        'Monday': 1,
+        'Tuesday': 2,
+        'Wednesday': 3,
+        'Thursday': 4,
+        'Friday': 5,
+        'Saturday': 6
+    };
+
+    // Helper to map day number to day name
+    const dayNumberToName = {
+        0: 'Sunday',
+        1: 'Monday',
+        2: 'Tuesday',
+        3: 'Wednesday',
+        4: 'Thursday',
+        5: 'Friday',
+        6: 'Saturday'
+    };
+
     const fetchWeeklyOffsAndEmployees = async () => {
         try {
             const [weeklyOffsResponse, employeesResponse] = await Promise.all([
@@ -43,16 +65,23 @@ const WeeklyOffManagement = ({ showMessage, apiBaseUrl, accessToken }) => {
 
     const handleAddWeeklyOff = async (e) => {
         e.preventDefault();
-        if (!selectedEmployeeId || !selectedDay || !startDate || !endDate) {
-            showMessage('Please select an employee, a day, and a start/end date for the weekly off.', 'error');
+        if (!selectedEmployeeId || !selectedDay || !startDate) { // endDate is now optional on backend
+            showMessage('Please select an employee, a day, and a start date for the weekly off.', 'error');
             return;
         }
+
+        const dayNumber = dayNameToNumber[selectedDay];
+        if (dayNumber === undefined) {
+            showMessage('Invalid day selected.', 'error');
+            return;
+        }
+
         try {
             await authAxios.post(`${apiBaseUrl}/api/admin/weekly-offs`, {
                 user_id: selectedEmployeeId,
-                day_of_week: selectedDay,
-                start_date: startDate, // Send new start_date
-                end_date: endDate      // Send new end_date
+                weekly_off_days: [dayNumber], // Send as an array of numbers
+                effective_date: startDate,      // Use startDate as effective_date
+                end_date: endDate || null       // Send endDate if present, otherwise null
             });
             showMessage('Weekly off added successfully!', 'success');
             setSelectedEmployeeId('');
@@ -67,6 +96,8 @@ const WeeklyOffManagement = ({ showMessage, apiBaseUrl, accessToken }) => {
     };
 
     const handleDeleteWeeklyOff = async (weeklyOffId) => {
+        // IMPORTANT: Replace window.confirm with a custom modal for better UX and consistency
+        // For now, keeping window.confirm as per previous code, but recommend replacing.
         if (window.confirm('Are you sure you want to delete this weekly off assignment?')) {
             try {
                 await authAxios.delete(`${apiBaseUrl}/api/admin/weekly-offs/${weeklyOffId}`);
@@ -130,7 +161,7 @@ const WeeklyOffManagement = ({ showMessage, apiBaseUrl, accessToken }) => {
                     </select>
                 </div>
                 <div>
-                    <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Start Date</label>
+                    <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Effective Date</label>
                     <input
                         type="date"
                         id="startDate"
@@ -141,14 +172,13 @@ const WeeklyOffManagement = ({ showMessage, apiBaseUrl, accessToken }) => {
                     />
                 </div>
                 <div>
-                    <label htmlFor="endDate" className="block text-sm font-medium text-gray-700 dark:text-gray-300">End Date</label>
+                    <label htmlFor="endDate" className="block text-sm font-medium text-gray-700 dark:text-gray-300">End Date (Optional)</label>
                     <input
                         type="date"
                         id="endDate"
                         className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
                         value={endDate}
                         onChange={(e) => setEndDate(e.target.value)}
-                        required
                     />
                 </div>
                 <button
@@ -166,8 +196,8 @@ const WeeklyOffManagement = ({ showMessage, apiBaseUrl, accessToken }) => {
                     <thead className="bg-gray-50 dark:bg-gray-700">
                         <tr>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Employee</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Day of Week</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Start Date</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Weekly Off Days</th> {/* Updated header */}
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Effective Date</th> {/* Updated header */}
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">End Date</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Actions</th>
                         </tr>
@@ -180,8 +210,14 @@ const WeeklyOffManagement = ({ showMessage, apiBaseUrl, accessToken }) => {
                                         {allEmployees.find(emp => emp.id === off.user_id)?.name || 'Unknown Employee'}
                                         ({allEmployees.find(emp => emp.id === off.user_id)?.employee_id || 'N/A'})
                                     </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{off.day_of_week}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{off.start_date ? moment(off.start_date).format('YYYY-MM-DD') : 'N/A'}</td>
+                                    {/* Display weekly_off_days as comma-separated names */}
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
+                                        {off.weekly_off_days && off.weekly_off_days.length > 0
+                                            ? off.weekly_off_days.map(dayNum => dayNumberToName[dayNum]).join(', ')
+                                            : 'N/A'}
+                                    </td>
+                                    {/* Display effective_date */}
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{off.effective_date ? moment(off.effective_date).format('YYYY-MM-DD') : 'N/A'}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{off.end_date ? moment(off.end_date).format('YYYY-MM-DD') : 'N/A'}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                                         <button
@@ -204,3 +240,6 @@ const WeeklyOffManagement = ({ showMessage, apiBaseUrl, accessToken }) => {
         </div>
     );
 };
+
+// Make the component globally accessible
+window.WeeklyOffManagement = WeeklyOffManagement;

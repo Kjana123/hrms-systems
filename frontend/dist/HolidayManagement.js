@@ -43,9 +43,11 @@ const HolidayManagement = ({
       return;
     }
     try {
+      // CORRECTED: Send holiday_date and holiday_name to match backend expectation
       await authAxios.post(`${apiBaseUrl}/api/admin/holidays`, {
-        date: newHolidayDate,
-        name: newHolidayName
+        holiday_date: newHolidayDate,
+        // Changed from 'date' to 'holiday_date'
+        holiday_name: newHolidayName // Changed from 'name' to 'holiday_name'
       });
       showMessage('Holiday added successfully!', 'success');
       setNewHolidayDate('');
@@ -57,6 +59,7 @@ const HolidayManagement = ({
     }
   };
   const handleDeleteHoliday = async holidayId => {
+    // IMPORTANT: Replace window.confirm with a custom modal for better UX and consistency
     if (window.confirm('Are you sure you want to delete this holiday?')) {
       try {
         await authAxios.delete(`${apiBaseUrl}/api/admin/holidays/${holidayId}`);
@@ -78,7 +81,7 @@ const HolidayManagement = ({
     }), /*#__PURE__*/React.createElement("div", {
       className: "w-4 h-4 rounded-full animate-pulse bg-blue-600"
     }), /*#__PURE__*/React.createElement("p", {
-      className: "ml-2"
+      className: "ml-2 text-gray-500 dark:text-gray-400"
     }, "Loading holidays..."));
   }
   return /*#__PURE__*/React.createElement("div", {
@@ -135,9 +138,9 @@ const HolidayManagement = ({
     className: "hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-150"
   }, /*#__PURE__*/React.createElement("td", {
     className: "px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white"
-  }, holiday.date), /*#__PURE__*/React.createElement("td", {
+  }, holiday.holiday_date), /*#__PURE__*/React.createElement("td", {
     className: "px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300"
-  }, holiday.name), /*#__PURE__*/React.createElement("td", {
+  }, holiday.holiday_name), /*#__PURE__*/React.createElement("td", {
     className: "px-6 py-4 whitespace-nowrap text-sm font-medium"
   }, /*#__PURE__*/React.createElement("button", {
     onClick: () => handleDeleteHoliday(holiday.id),
@@ -147,3 +150,6 @@ const HolidayManagement = ({
     className: "px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400"
   }, "No holidays added yet."))))));
 };
+
+// Make the component globally accessible
+window.HolidayManagement = HolidayManagement;

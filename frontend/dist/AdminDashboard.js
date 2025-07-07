@@ -594,6 +594,9 @@ const AdminDashboard = ({
     ,
     className: `w-full text-left py-2 px-4 rounded-md font-medium transition-colors duration-200 ${activeTab === 'profile-requests' ? darkMode ? 'bg-purple-600 text-white shadow-md' : 'bg-indigo-600 text-white shadow-md' : darkMode ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-200'}`
   }, "Profile Requests"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setActiveTab('payroll'),
+    className: `w-full text-left py-2 px-4 rounded-md font-medium transition-colors duration-200 ${activeTab === 'payroll' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'}`
+  }, "Payroll Management"), /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowExportModal(true),
     className: `w-full text-left py-2 px-4 rounded-md font-medium transition-colors duration-200 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700`
   }, "Export Attendance")), /*#__PURE__*/React.createElement("div", {
@@ -969,7 +972,15 @@ const AdminDashboard = ({
     apiBaseUrl: apiBaseUrl,
     accessToken: accessToken,
     darkMode: darkMode
-  }))), showExportModal && /*#__PURE__*/React.createElement("div", {
+  })), activeTab === 'payroll' && /*#__PURE__*/React.createElement(AdminPayrollManagement, {
+    showMessage: showMessage,
+    apiBaseUrl: apiBaseUrl,
+    accessToken: accessToken,
+    authAxios: authAxios,
+    employees: employees // Pass employees for selection in sub-components
+    ,
+    darkMode: darkMode // Pass dark mode for styling
+  })), showExportModal && /*#__PURE__*/React.createElement("div", {
     className: "fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50"
   }, /*#__PURE__*/React.createElement("div", {
     className: `bg-white dark:bg-gray-800 p-8 rounded-lg shadow-xl w-full max-w-md ${darkMode ? 'text-white' : 'text-gray-800'}`
@@ -1188,4 +1199,3 @@ const AdminDashboard = ({
     className: "px-6 py-2 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
   }, "Close"))))));
 };
-window.AdminDashboard = AdminDashboard;

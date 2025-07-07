@@ -22,6 +22,19 @@ const AdminLeaveManagement = ({ showMessage, apiBaseUrl, accessToken, authAxios 
     const [balanceOperation, setBalanceOperation] = React.useState('set'); // 'add', 'subtract', 'set'
     const [allEmployees, setAllEmployees] = React.useState([]); // To populate user dropdown for balances
 
+    // Helper function to calculate duration (copied from previous interaction)
+    const calculateLeaveDuration = (fromDate, toDate, isHalfDay) => {
+        const start = moment(fromDate);
+        const end = moment(toDate);
+        let duration = end.diff(start, 'days') + 1; // Inclusive of start and end dates
+
+        if (isHalfDay && start.isSame(end, 'day')) {
+            duration = 0.5; // If it's a half-day leave on a single day
+        }
+        return duration;
+    };
+
+
     // Fetch data based on active sub-tab and dependencies
     React.useEffect(() => {
         const fetchData = async () => {
@@ -42,7 +55,14 @@ const AdminLeaveManagement = ({ showMessage, apiBaseUrl, accessToken, authAxios 
 
                 if (activeSubTab === 'applications') {
                     const response = await authAxios.get(`${apiBaseUrl}/api/admin/leaves`);
-                    setLeaveApplications(response.data);
+                    // Apply duration calculation and date formatting here
+                    const formattedApplications = response.data.map(app => ({
+                        ...app,
+                        from_date: moment(app.from_date).format('YYYY-MM-DD'),
+                        to_date: moment(app.to_date).format('YYYY-MM-DD'),
+                        duration: calculateLeaveDuration(app.from_date, app.to_date, app.is_half_day)
+                    }));
+                    setLeaveApplications(formattedApplications);
                 } else if (activeSubTab === 'balances') {
                     const balancesRes = await authAxios.get(`${apiBaseUrl}/api/admin/leave-balances`);
                     setLeaveBalances(balancesRes.data);
@@ -64,13 +84,9 @@ const AdminLeaveManagement = ({ showMessage, apiBaseUrl, accessToken, authAxios 
 
     // --- Leave Applications Management ---
     const handleLeaveStatusUpdate = async (applicationId, status, adminComment = '') => {
-        // Using custom modal for confirmation instead of window.confirm
-        const isConfirmed = await new Promise((resolve) => {
-            // Implement your custom confirmation modal here
-            // For now, using a simple alert for demonstration, replace with your modal
-            const confirmed = window.confirm(`Are you sure you want to ${status} this leave application?`);
-            resolve(confirmed);
-        });
+        // IMPORTANT: Use a custom modal for confirmation instead of window.confirm
+        // For now, keeping window.confirm as per previous code structure, but note the instruction.
+        const isConfirmed = window.confirm(`Are you sure you want to ${status} this leave application?`);
 
         if (!isConfirmed) {
             return;
@@ -80,7 +96,13 @@ const AdminLeaveManagement = ({ showMessage, apiBaseUrl, accessToken, authAxios 
             showMessage(`Leave application ${status} successfully!`, 'success');
             // Re-fetch applications
             const response = await authAxios.get(`${apiBaseUrl}/api/admin/leaves`);
-            setLeaveApplications(response.data);
+            const formattedApplications = response.data.map(app => ({
+                ...app,
+                from_date: moment(app.from_date).format('YYYY-MM-DD'),
+                to_date: moment(app.to_date).format('YYYY-MM-DD'),
+                duration: calculateLeaveDuration(app.from_date, app.to_date, app.is_half_day)
+            }));
+            setLeaveApplications(formattedApplications);
         } catch (error) {
             console.error("Error updating leave status:", error.response?.data?.message || error.message);
             showMessage(`Failed to update leave status: ${error.response?.data?.message || error.message}`, 'error');
@@ -116,13 +138,9 @@ const AdminLeaveManagement = ({ showMessage, apiBaseUrl, accessToken, authAxios 
     };
 
     const handleDeleteLeaveType = async (typeId) => {
-        // Using custom modal for confirmation instead of window.confirm
-        const isConfirmed = await new Promise((resolve) => {
-            // Implement your custom confirmation modal here
-            // For now, using a simple alert for demonstration, replace with your modal
-            const confirmed = window.confirm('Are you sure you want to delete this leave type? This action cannot be undone and may affect existing leave applications/balances.');
-            resolve(confirmed);
-        });
+        // IMPORTANT: Use a custom modal for confirmation instead of window.confirm
+        // For now, keeping window.confirm as per previous code structure, but note the instruction.
+        const isConfirmed = window.confirm('Are you sure you want to delete this leave type? This action cannot be undone and may affect existing leave applications/balances.');
 
         if (!isConfirmed) {
             return;
@@ -230,13 +248,9 @@ const AdminLeaveManagement = ({ showMessage, apiBaseUrl, accessToken, authAxios 
     };
 
     const handleDeleteLeaveBalance = async (userId, leaveType) => { // Now accepts user_id and leave_type
-        // Using custom modal for confirmation instead of window.confirm
-        const isConfirmed = await new Promise((resolve) => {
-            // Implement your custom confirmation modal here
-            // For now, using a simple alert for demonstration, replace with your modal
-            const confirmed = window.confirm(`Are you sure you want to delete the ${leaveType} balance for this employee?`);
-            resolve(confirmed);
-        });
+        // IMPORTANT: Use a custom modal for confirmation instead of window.confirm
+        // For now, keeping window.confirm as per previous code structure, but note the instruction.
+        const isConfirmed = window.confirm(`Are you sure you want to delete the ${leaveType} balance for this employee?`);
 
         if (!isConfirmed) {
             return;
@@ -244,9 +258,9 @@ const AdminLeaveManagement = ({ showMessage, apiBaseUrl, accessToken, authAxios 
         try {
             // Send DELETE request with user_id and leave_type in query parameters or body
             // Using query parameters is simpler for DELETE
-            await authAxios.delete(`${apiBaseUrl}/api/admin/leave-balances/${userId}`, {
-                params: { leave_type: leaveType }
-            });
+           await authAxios.delete(`${apiBaseUrl}/api/admin/leave-balances`, {
+    data: { userId, leaveType } // Use 'data' property for DELETE requests with body
+});
             showMessage('Leave balance record deleted successfully!', 'success');
             // Re-fetch leave balances
             const [balancesRes, employeesRes] = await Promise.all([
@@ -522,3 +536,6 @@ const AdminLeaveManagement = ({ showMessage, apiBaseUrl, accessToken, authAxios 
         </div>
     );
 };
+
+// Make the component globally accessible
+window.AdminLeaveManagement = AdminLeaveManagement;

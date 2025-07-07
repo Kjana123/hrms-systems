@@ -41,9 +41,10 @@ const HolidayManagement = ({ showMessage, apiBaseUrl, accessToken }) => {
             return;
         }
         try {
+            // CORRECTED: Send holiday_date and holiday_name to match backend expectation
             await authAxios.post(`${apiBaseUrl}/api/admin/holidays`, {
-                date: newHolidayDate,
-                name: newHolidayName
+                holiday_date: newHolidayDate, // Changed from 'date' to 'holiday_date'
+                holiday_name: newHolidayName // Changed from 'name' to 'holiday_name'
             });
             showMessage('Holiday added successfully!', 'success');
             setNewHolidayDate('');
@@ -56,6 +57,7 @@ const HolidayManagement = ({ showMessage, apiBaseUrl, accessToken }) => {
     };
 
     const handleDeleteHoliday = async (holidayId) => {
+        // IMPORTANT: Replace window.confirm with a custom modal for better UX and consistency
         if (window.confirm('Are you sure you want to delete this holiday?')) {
             try {
                 await authAxios.delete(`${apiBaseUrl}/api/admin/holidays/${holidayId}`);
@@ -74,7 +76,7 @@ const HolidayManagement = ({ showMessage, apiBaseUrl, accessToken }) => {
                 <div className="w-4 h-4 rounded-full animate-pulse bg-blue-600"></div>
                 <div className="w-4 h-4 rounded-full animate-pulse bg-blue-600"></div>
                 <div className="w-4 h-4 rounded-full animate-pulse bg-blue-600"></div>
-                <p className="ml-2">Loading holidays...</p>
+                <p className="ml-2 text-gray-500 dark:text-gray-400">Loading holidays...</p>
             </div>
         );
     }
@@ -132,8 +134,9 @@ const HolidayManagement = ({ showMessage, apiBaseUrl, accessToken }) => {
                         {holidays.length > 0 ? (
                             holidays.map(holiday => (
                                 <tr key={holiday.id} className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-150">
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{holiday.date}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{holiday.name}</td>
+                                    {/* Displaying holiday.holiday_date and holiday.holiday_name to match backend response */}
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{holiday.holiday_date}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{holiday.holiday_name}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                                         <button
                                             onClick={() => handleDeleteHoliday(holiday.id)}
@@ -156,3 +159,5 @@ const HolidayManagement = ({ showMessage, apiBaseUrl, accessToken }) => {
     );
 };
 
+// Make the component globally accessible
+window.HolidayManagement = HolidayManagement;

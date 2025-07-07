@@ -18,7 +18,7 @@ console.log(`[GLOBAL DEBUG] Script loaded. Current Moment (IST): ${moment().form
 const EmployeeDashboard = ({ user, handleLogout, darkMode, toggleDarkMode, showMessage, apiBaseUrl, accessToken }) => {
     // State for overall loading and active tab
     const [loading, setLoading] = React.useState(true); // Overall loading for the dashboard
-    const [activeTab, setActiveTab] = React.useState('dashboard'); // 'dashboard', 'apply-leave', 'my-leaves', 'correction', 'profile', 'notifications', 'leave-balances'
+    const [activeTab, setActiveTab] = React.useState('dashboard'); // 'dashboard', 'apply-leave', 'my-leaves', 'correction', 'profile', 'notifications', 'leave-balances' 'payslips'
 
     // State for attendance data
     const [attendanceToday, setAttendanceToday] = React.useState(null);
@@ -160,7 +160,7 @@ const EmployeeDashboard = ({ user, handleLogout, darkMode, toggleDarkMode, showM
     // Function to fetch leave balances
     const fetchLeaveBalances = async () => {
         try {
-            const response = await authAxios.get(`${apiBaseUrl}/api/leaves/my-balances`);
+            const response = await authAxAxios.get(`${apiBaseUrl}/api/leaves/my-balances`);
             setLeaveBalances(response.data);
         } catch (error) {
             console.error("Error fetching leave balances:", error.response?.data?.message || error.message);
@@ -450,6 +450,13 @@ const EmployeeDashboard = ({ user, handleLogout, darkMode, toggleDarkMode, showM
                     >
                         Profile Settings
                     </button>
+
+                    <button
+    onClick={() => setActiveTab('payslips')}
+    className={`w-full text-left py-2 px-4 rounded-md font-medium transition-colors duration-200 ${activeTab === 'payslips' ? (darkMode ? 'bg-purple-600 text-white shadow-md' : 'bg-indigo-600 text-white shadow-md') : (darkMode ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-200')}`}
+>
+    My Payslips
+</button>
                 </nav>
                 <div className="mt-8 pt-8 border-t border-gray-200 dark:border-gray-700">
                     <button
@@ -490,50 +497,52 @@ const EmployeeDashboard = ({ user, handleLogout, darkMode, toggleDarkMode, showM
                         )}
 
                         {/* Today's Attendance Overview */}
-                        <div className={`p-6 rounded-lg shadow-md transition-colors duration-300 ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
-                            <h3 className="text-xl font-semibold mb-4">Today's Attendance ({moment().format('YYYY-MM-DD')})</h3>
+                        <div className={`p-6 rounded-lg shadow-xl transition-colors duration-300 ${darkMode ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'}`}>
+                            <h3 className="text-2xl font-bold mb-4 text-center">Today's Attendance ({moment().format('YYYY-MM-DD')})</h3>
                             {loadingAttendanceToday ? (
-                                <p className="text-gray-500 dark:text-gray-400">Loading today's attendance...</p>
+                                <p className="text-center text-gray-500 dark:text-gray-400">Loading today's attendance...</p>
                             ) : (
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div className="flex items-center space-x-4">
-                                        <div className={`p-3 rounded-full ${getStatusClasses(attendanceToday?.status || 'ABSENT')}`}>
-                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+                                    <div className="flex flex-col items-center space-y-3 p-4 rounded-lg bg-gradient-to-br from-blue-50 to-blue-100 dark:from-gray-700 dark:to-gray-750 shadow-inner">
+                                        <div className={`p-4 rounded-full shadow-lg ${getStatusClasses(attendanceToday?.status || 'ABSENT')}`}>
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                 {attendanceToday?.status === 'PRESENT' || attendanceToday?.status === 'PRESENT BY CORRECTION' ? (
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                                ) : (
+                                                ) : attendanceToday?.status === 'LOP' || attendanceToday?.status === 'ABSENT' ? (
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                ) : (
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                                                 )}
                                             </svg>
                                         </div>
-                                        <div>
-                                            <p className="text-lg font-bold">{attendanceToday?.status || 'UNKNOWN'}</p>
-                                            <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                                                {/* CORRECTED: Removed .local() */}
-                                                Check-in: {attendanceToday?.check_in ? moment(attendanceToday.check_in).format('hh:mm A') : 'N/A'} | Check-out: {attendanceToday?.check_out ? moment(attendanceToday.check_out).format('hh:mm A') : 'N/A'}
-                                            </p>
-                                            {attendanceToday?.late_time > 0 && (
-                                                <p className="text-sm text-red-500 dark:text-red-400">Late by: {attendanceToday.late_time} mins</p>
-                                            )}
-                                            {attendanceToday?.working_hours > 0 && (
-                                                <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Working Hours: {attendanceToday.working_hours} hrs</p>
-                                            )}
-                                        </div>
+                                        <p className="text-2xl font-extrabold text-gray-900 dark:text-white">{attendanceToday?.status || 'UNKNOWN'}</p>
+                                        <p className={`text-md ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                                            Check-in: {attendanceToday?.check_in ? moment(attendanceToday.check_in).format('hh:mm A') : 'N/A'}
+                                        </p>
+                                        <p className={`text-md ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                                            Check-out: {attendanceToday?.check_out ? moment(attendanceToday.check_out).format('hh:mm A') : 'N/A'}
+                                        </p>
+                                        {attendanceToday?.late_time > 0 && (
+                                            <p className="text-md text-red-500 dark:text-red-400 font-semibold">Late by: {attendanceToday.late_time} mins</p>
+                                        )}
+                                        {attendanceToday?.working_hours > 0 && (
+                                            <p className={`text-md ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Working Hours: {attendanceToday.working_hours} hrs</p>
+                                        )}
                                     </div>
-                                    <div className="flex flex-col space-y-2 justify-center">
+                                    <div className="flex flex-col space-y-4 justify-center p-4">
                                         {/* Check-in button logic */}
                                         {!hasCheckedInToday && (
                                             <button
                                                 onClick={handleCheckIn}
                                                 // Disable if status is NOT_APPLICABLE (e.g., holiday, weekly off, on leave)
-                                                disabled={['ON LEAVE', 'HALF DAY LEAVE', 'HOLIDAY', 'WEEKLY OFF'].includes(attendanceToday?.status)}
-                                                className={`px-6 py-3 rounded-md shadow-md transition-colors duration-200 flex items-center justify-center
-                                                    ${['ON LEAVE', 'HALF DAY LEAVE', 'HOLIDAY', 'WEEKLY OFF'].includes(attendanceToday?.status)
-                                                        ? 'bg-gray-400 cursor-not-allowed'
-                                                        : (darkMode ? 'bg-purple-600 text-white hover:bg-purple-700' : 'bg-indigo-600 text-white hover:bg-indigo-700')
+                                                disabled={['ON LEAVE', 'HALF DAY LEAVE', 'HOLIDAY', 'WEEKLY OFF', 'LOP'].includes(attendanceToday?.status)}
+                                                className={`px-8 py-4 rounded-xl shadow-lg transition-all duration-300 transform hover:scale-105 flex items-center justify-center font-bold text-lg
+                                                    ${['ON LEAVE', 'HALF DAY LEAVE', 'HOLIDAY', 'WEEKLY OFF', 'LOP'].includes(attendanceToday?.status)
+                                                        ? 'bg-gray-400 text-gray-700 cursor-not-allowed'
+                                                        : (darkMode ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:from-purple-700 hover:to-indigo-700' : 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white hover:from-indigo-700 hover:to-blue-700')
                                                     }`}
                                             >
-                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-3" viewBox="0 0 20 20" fill="currentColor">
                                                     <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
                                                 </svg>
                                                 Check In
@@ -543,9 +552,9 @@ const EmployeeDashboard = ({ user, handleLogout, darkMode, toggleDarkMode, showM
                                         {hasCheckedInToday && canCheckOut && (
                                             <button
                                                 onClick={handleCheckOut}
-                                                className="px-6 py-3 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors duration-200 shadow-md flex items-center justify-center"
+                                                className="px-8 py-4 bg-gradient-to-r from-red-600 to-pink-600 text-white rounded-xl shadow-lg hover:from-red-700 hover:to-pink-700 transition-all duration-300 transform hover:scale-105 flex items-center justify-center font-bold text-lg"
                                             >
-                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-3" viewBox="0 0 20 20" fill="currentColor">
                                                     <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 9a1 1 0 000 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
                                                 </svg>
                                                 Check Out
@@ -557,11 +566,11 @@ const EmployeeDashboard = ({ user, handleLogout, darkMode, toggleDarkMode, showM
                         </div>
 
                         {/* Monthly Analytics Summary */}
-                        <div className={`p-6 rounded-lg shadow-md transition-colors duration-300 ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
-                            <h3 className="text-xl font-semibold mb-4">Monthly Analytics Summary ({moment().month(selectedMonth - 1).format('MMMM')} {selectedYear})</h3>
-                            <div className="flex space-x-4 mb-6">
+                        <div className={`p-6 rounded-lg shadow-xl transition-colors duration-300 ${darkMode ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'}`}>
+                            <h3 className="text-2xl font-bold mb-4 text-center">Monthly Analytics Summary ({moment().month(selectedMonth - 1).format('MMMM')} {selectedYear})</h3>
+                            <div className="flex flex-wrap justify-center gap-4 mb-6">
                                 <select
-                                    className={`px-4 py-2 rounded-md border ${darkMode ? 'border-gray-600 bg-gray-700 text-white' : 'border-gray-300 bg-white text-gray-900'} focus:ring-blue-500 focus:border-blue-500`}
+                                    className={`px-4 py-2 rounded-lg border ${darkMode ? 'border-gray-600 bg-gray-700 text-white' : 'border-gray-300 bg-white text-gray-900'} focus:ring-blue-500 focus:border-blue-500 shadow-sm`}
                                     value={selectedMonth}
                                     onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
                                 >
@@ -570,7 +579,7 @@ const EmployeeDashboard = ({ user, handleLogout, darkMode, toggleDarkMode, showM
                                     ))}
                                 </select>
                                 <select
-                                    className={`px-4 py-2 rounded-md border ${darkMode ? 'border-gray-600 bg-gray-700 text-white' : 'border-gray-300 bg-white text-gray-900'} focus:outline-none focus:ring-blue-500 focus:border-blue-500`}
+                                    className={`px-4 py-2 rounded-lg border ${darkMode ? 'border-gray-600 bg-gray-700 text-white' : 'border-gray-300 bg-white text-gray-900'} focus:outline-none focus:ring-blue-500 focus:border-blue-500 shadow-sm`}
                                     value={selectedYear}
                                     onChange={(e) => setSelectedYear(parseInt(e.target.value))}
                                 >
@@ -580,57 +589,56 @@ const EmployeeDashboard = ({ user, handleLogout, darkMode, toggleDarkMode, showM
                                 </select>
                             </div>
                             {loadingAnalyticsData ? (
-                                <p className={`text-gray-500 ${darkMode ? 'dark:text-gray-400' : ''}`}>Loading monthly analytics...</p>
+                                <p className={`text-center text-gray-500 ${darkMode ? 'dark:text-gray-400' : ''}`}>Loading monthly analytics...</p>
                             ) : (
                                 analyticsData ? (
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                                        <div className="bg-green-100 dark:bg-green-900 p-4 rounded-lg shadow-sm text-green-800 dark:text-green-200">
-                                            <p className="text-sm font-medium">Present Days</p>
-                                            <p className="text-2xl font-bold">{analyticsData.presentDays || 0}</p>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                                        <div className="bg-gradient-to-br from-green-400 to-green-600 text-white p-5 rounded-lg shadow-md transform hover:scale-105 transition-transform duration-200">
+                                            <p className="text-sm font-medium opacity-90">Present Days</p>
+                                            <p className="text-3xl font-bold mt-1">{analyticsData.presentDays || 0}</p>
                                         </div>
-                                        <div className="bg-orange-100 dark:bg-orange-900 p-4 rounded-lg shadow-sm text-orange-800 dark:text-orange-200">
-                                            <p className="text-sm font-medium">Late Days</p>
-                                            <p className="text-2xl font-bold">{analyticsData.lateDays || 0}</p>
+                                        <div className="bg-gradient-to-br from-yellow-400 to-orange-500 text-white p-5 rounded-lg shadow-md transform hover:scale-105 transition-transform duration-200">
+                                            <p className="text-sm font-medium opacity-90">Late Days</p>
+                                            <p className="text-3xl font-bold mt-1">{analyticsData.lateDays || 0}</p>
                                         </div>
-                                        <div className="bg-red-100 dark:bg-red-900 p-4 rounded-lg shadow-sm text-red-800 dark:text-red-200">
-                                            <p className="text-sm font-medium">Absent Days</p>
-                                            <p className="text-2xl font-bold">{analyticsData.absentDays || 0}</p>
+                                        <div className="bg-gradient-to-br from-red-400 to-red-600 text-white p-5 rounded-lg shadow-md transform hover:scale-105 transition-transform duration-200">
+                                            <p className="text-sm font-medium opacity-90">Absent Days</p>
+                                            <p className="text-3xl font-bold mt-1">{analyticsData.absentDays || 0}</p>
                                         </div>
-                                        <div className="bg-purple-100 dark:bg-purple-900 p-4 rounded-lg shadow-sm text-purple-800 dark:text-purple-200">
-                                            <p className="text-sm font-medium">Leave Days</p>
-                                            <p className="text-2xl font-bold">{analyticsData.leaveDays || 0}</p>
+                                        <div className="bg-gradient-to-br from-blue-400 to-blue-600 text-white p-5 rounded-lg shadow-md transform hover:scale-105 transition-transform duration-200">
+                                            <p className="text-sm font-medium opacity-90">Paid Leave Days</p>
+                                            <p className="text-3xl font-bold mt-1">{analyticsData.leaveDays || 0}</p>
                                         </div>
-                                        <div className="bg-blue-100 dark:bg-blue-900 p-4 rounded-lg shadow-sm text-blue-800 dark:text-blue-200">
-                                            <p className="text-sm font-medium">Holidays</p>
-                                            <p className="text-2xl font-bold">{analyticsData.holidays || 0}</p>
+                                        <div className="bg-gradient-to-br from-purple-400 to-purple-600 text-white p-5 rounded-lg shadow-md transform hover:scale-105 transition-transform duration-200">
+                                            <p className="text-sm font-medium opacity-90">LOP Days</p>
+                                            <p className="text-3xl font-bold mt-1">{analyticsData.lopDays || 0}</p>
                                         </div>
-                                        <div className="bg-indigo-100 dark:bg-indigo-900 p-4 rounded-lg shadow-sm text-indigo-800 dark:text-indigo-200">
-                                            <p className="text-sm font-medium">Weekly Offs</p>
-                                            <p className="text-2xl font-bold">{analyticsData.weeklyOffs || 0}</p>
+                                        <div className="bg-gradient-to-br from-teal-400 to-teal-600 text-white p-5 rounded-lg shadow-md transform hover:scale-105 transition-transform duration-200">
+                                            <p className="text-sm font-medium opacity-90">Holidays</p>
+                                            <p className="text-3xl font-bold mt-1">{analyticsData.holidays || 0}</p>
                                         </div>
-                                        <div className="bg-pink-100 dark:bg-pink-900 p-4 rounded-lg shadow-sm text-pink-800 dark:text-pink-200">
-                                            <p className="text-sm font-medium">LOP Days</p>
-                                            <p className="text-2xl font-bold">{analyticsData.lopDays || 0}</p>
+                                        <div className="bg-gradient-to-br from-pink-400 to-pink-600 text-white p-5 rounded-lg shadow-md transform hover:scale-105 transition-transform duration-200">
+                                            <p className="text-sm font-medium opacity-90">Weekly Offs</p>
+                                            <p className="text-3xl font-bold mt-1">{analyticsData.weeklyOffs || 0}</p>
                                         </div>
-                                        {/* Added Total Working Hours */}
-                                        <div className="bg-yellow-100 dark:bg-yellow-900 p-4 rounded-lg shadow-sm text-yellow-800 dark:text-yellow-200">
-                                            <p className="text-sm font-medium">Total Working Hours</p>
-                                            <p className="text-2xl font-bold">{analyticsData.totalWorkingHours ? `${analyticsData.totalWorkingHours.toFixed(2)} hrs` : '0 hrs'}</p>
+                                        <div className="bg-gradient-to-br from-gray-400 to-gray-600 text-white p-5 rounded-lg shadow-md transform hover:scale-105 transition-transform duration-200">
+                                            <p className="text-sm font-medium opacity-90">Total Working Hours</p>
+                                            <p className="text-3xl font-bold mt-1">{analyticsData.totalWorkingHours ? `${analyticsData.totalWorkingHours.toFixed(2)} hrs` : '0 hrs'}</p>
                                         </div>
                                     </div>
                                 ) : (
-                                    <p className={`text-gray-500 ${darkMode ? 'dark:text-gray-400' : ''}`}>No analytics data available for this period.</p>
+                                    <p className={`text-center text-gray-500 ${darkMode ? 'dark:text-gray-400' : ''}`}>No analytics data available for this period.</p>
                                 )
                             )}
                         </div>
 
 
                         {/* Monthly Attendance History */}
-                        <div className={`p-6 rounded-lg shadow-md transition-colors duration-300 ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
-                            <h3 className="text-xl font-semibold mb-4">Monthly Attendance History</h3>
-                            <div className="flex space-x-4 mb-6">
+                        <div className={`p-6 rounded-lg shadow-xl transition-colors duration-300 ${darkMode ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'}`}>
+                            <h3 className="text-2xl font-bold mb-4 text-center">Monthly Attendance History</h3>
+                            <div className="flex flex-wrap justify-center gap-4 mb-6">
                                 <select
-                                    className={`px-4 py-2 rounded-md border ${darkMode ? 'border-gray-600 bg-gray-700 text-white' : 'border-gray-300 bg-white text-gray-900'} focus:ring-blue-500 focus:border-blue-500`}
+                                    className={`px-4 py-2 rounded-lg border ${darkMode ? 'border-gray-600 bg-gray-700 text-white' : 'border-gray-300 bg-white text-gray-900'} focus:ring-blue-500 focus:border-blue-500 shadow-sm`}
                                     value={selectedMonth}
                                     onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
                                 >
@@ -639,7 +647,7 @@ const EmployeeDashboard = ({ user, handleLogout, darkMode, toggleDarkMode, showM
                                     ))}
                                 </select>
                                 <select
-                                    className={`px-4 py-2 rounded-md border ${darkMode ? 'border-gray-600 bg-gray-700 text-white' : 'border-gray-300 bg-white text-gray-900'} focus:outline-none focus:ring-blue-500 focus:border-blue-500`}
+                                    className={`px-4 py-2 rounded-lg border ${darkMode ? 'border-gray-600 bg-gray-700 text-white' : 'border-gray-300 bg-white text-gray-900'} focus:outline-none focus:ring-blue-500 focus:border-blue-500 shadow-sm`}
                                     value={selectedYear}
                                     onChange={(e) => setSelectedYear(parseInt(e.target.value))}
                                 >
@@ -650,9 +658,9 @@ const EmployeeDashboard = ({ user, handleLogout, darkMode, toggleDarkMode, showM
                             </div>
 
                             {loadingAttendanceHistory ? (
-                                <p className={`text-gray-500 ${darkMode ? 'dark:text-gray-400' : ''}`}>Loading attendance history...</p>
+                                <p className={`text-center text-gray-500 ${darkMode ? 'dark:text-gray-400' : ''}`}>Loading attendance history...</p>
                             ) : (
-                                <div className="overflow-x-auto rounded-lg shadow-md">
+                                <div className="overflow-x-auto rounded-lg shadow-md border border-gray-200 dark:border-gray-700">
                                     <table className={`min-w-full divide-y ${darkMode ? 'divide-gray-700' : 'divide-gray-200'}`}>
                                         <thead className={`${darkMode ? 'bg-gray-700' : 'bg-gray-50'}`}>
                                             <tr>
@@ -781,7 +789,18 @@ const EmployeeDashboard = ({ user, handleLogout, darkMode, toggleDarkMode, showM
                         />
                     </section>
                 )}
-
+{/* START PAYSLIPS TAB CONTENT */}
+{activeTab === 'payslips' && (
+    <section className={`p-6 rounded-lg shadow-md transition-colors duration-300 ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
+        <h2 className="text-3xl font-bold mb-8">My Payslips</h2>
+        <EmployeePayslips
+            showMessage={showMessage}
+            apiBaseUrl={apiBaseUrl}
+            accessToken={accessToken}
+        />
+    </section>
+)}
+{/* END PAYSLIPS TAB CONTENT */}
                 {/* Profile Settings Tab Content */}
                 {activeTab === 'profile' && (
                     <section className={`p-6 rounded-lg shadow-md transition-colors duration-300 ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>

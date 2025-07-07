@@ -616,12 +616,24 @@ const AdminDashboard = ({ user, handleLogout, darkMode, toggleDarkMode, showMess
 >
     Profile Requests
 </button>
+
+{/* --- START PAYROLL TAB ADDITION --- */}
+                    <button
+                        onClick={() => setActiveTab('payroll')}
+                        className={`w-full text-left py-2 px-4 rounded-md font-medium transition-colors duration-200 ${activeTab === 'payroll' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'}`}
+                    >
+                        Payroll Management
+                    </button>
+                    {/* --- END PAYROLL TAB ADDITION --- */}
+                    
                     <button
                         onClick={() => setShowExportModal(true)}
                         className={`w-full text-left py-2 px-4 rounded-md font-medium transition-colors duration-200 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700`}
                     >
                         Export Attendance
                     </button>
+
+                    
                 </nav>
                 <div className="mt-8 pt-8 border-t border-gray-200 dark:border-gray-700">
                     <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">Logged in as:</p>
@@ -1043,6 +1055,20 @@ const AdminDashboard = ({ user, handleLogout, darkMode, toggleDarkMode, showMess
         />
     </section>
 )}
+
+{/* --- START PAYROLL MANAGEMENT TAB CONTENT --- */}
+                {activeTab === 'payroll' && (
+                    <AdminPayrollManagement
+                        showMessage={showMessage}
+                        apiBaseUrl={apiBaseUrl}
+                        accessToken={accessToken}
+                        authAxios={authAxios}
+                        employees={employees} // Pass employees for selection in sub-components
+                        darkMode={darkMode} // Pass dark mode for styling
+                    />
+                )}
+                {/* --- END PAYROLL MANAGEMENT TAB CONTENT --- */}
+           
                 
             </main>
 
@@ -1339,5 +1365,3 @@ const AdminDashboard = ({ user, handleLogout, darkMode, toggleDarkMode, showMess
         </div>
     );
 };
-
-window.AdminDashboard = AdminDashboard;

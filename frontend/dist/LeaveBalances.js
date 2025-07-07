@@ -1,4 +1,6 @@
 // LeaveBalances.js
+// This component displays an employee's leave balances.
+// It will now manage its own state for leave balances by fetching them directly.
 // REMOVE all local import/export statements when using type="text/babel" in index.html
 
 const LeaveBalances = ({
@@ -6,7 +8,8 @@ const LeaveBalances = ({
   apiBaseUrl,
   accessToken
 }) => {
-  const [leaveBalances, setLeaveBalances] = React.useState([]);
+  // Removed leaveBalances from props
+  const [leaveBalances, setLeaveBalances] = React.useState([]); // Local state for leave balances
   const [loadingBalances, setLoadingBalances] = React.useState(true);
 
   // Axios instance with token for authenticated requests
@@ -16,10 +19,13 @@ const LeaveBalances = ({
       Authorization: `Bearer ${accessToken}`
     }
   });
+
+  // Function to fetch leave balances
   const fetchLeaveBalances = async () => {
+    setLoadingBalances(true);
     try {
       const response = await authAxios.get(`${apiBaseUrl}/api/leaves/my-balances`);
-      setLeaveBalances(response.data);
+      setLeaveBalances(response.data); // Update local state with fetched data
     } catch (error) {
       console.error("Error fetching leave balances:", error.response?.data?.message || error.message);
       showMessage(`Error fetching leave balances: ${error.response?.data?.message || error.message}`, "error");
@@ -28,10 +34,11 @@ const LeaveBalances = ({
     }
   };
   React.useEffect(() => {
+    // Fetch leave balances when the component mounts or accessToken changes
     if (accessToken) {
       fetchLeaveBalances();
     }
-  }, [accessToken]); // Re-fetch when accessToken changes
+  }, [accessToken]); // Depend on accessToken to re-fetch if it changes
 
   if (loadingBalances) {
     return /*#__PURE__*/React.createElement("p", {
@@ -78,3 +85,6 @@ const LeaveBalances = ({
     className: "px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400"
   }, "No leave balances found."))))));
 };
+
+// Make the component globally accessible
+window.LeaveBalances = LeaveBalances;
