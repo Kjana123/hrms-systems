@@ -731,7 +731,7 @@ function AdminPayrollManagement({ showMessage, apiBaseUrl, accessToken, authAxio
             )}
         </section>
     );
-};
+}
 
 // Make the component globally accessible
 window.AdminPayrollManagement = AdminPayrollManagement;
