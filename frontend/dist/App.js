@@ -19,7 +19,7 @@ const App = () => {
   const [loadingApp, setLoadingApp] = React.useState(true); // New loading state for the App component
 
   // Base URL for your backend API
-  const API_BASE_URL = 'http://localhost:3001'; // Adjust if your backend runs on a different port/domain
+  const API_BASE_URL = 'https://hrms-backend-rhsc.onrender.com'; // Adjust if your backend runs on a different port/domain
 
   // Function to set the access token in Axios headers for all subsequent requests
   const setAuthHeader = token => {

@@ -1,7 +1,7 @@
 // AdminPayrollManagement.js
 // REMOVE all local import/export statements when using type="text/babel" in index.html
 
-const AdminPayrollManagement = ({ showMessage, apiBaseUrl, accessToken, authAxios, employees, darkMode }) => {
+function AdminPayrollManagement({ showMessage, apiBaseUrl, accessToken, authAxios, employees, darkMode }) {
     const [activeSubTab, setActiveSubTab] = React.useState('settings'); // 'settings', 'salary-structures', 'payslip-upload', 'payroll-run'
 
     // State for Payroll Settings
