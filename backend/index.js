@@ -1,3 +1,6 @@
+// index.js
+
+console.log(`[FILE_LOAD_CHECK] index.js loaded at ${new Date().toISOString()}`);
 
 require('dotenv').config(); // Load environment variables
 
@@ -5,23 +8,33 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
-const moment = require('moment-timezone');
-const pool = require('./db'); // Your database connection pool
+const moment = require('moment-timezone'); // Use moment-timezone
+const { Pool } = require('pg'); // Explicitly import Pool
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const useragent = require('express-useragent');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs'); // Import fs for directory creation
+const PDFDocument = require('pdfkit'); // For PDF generation
 
 // Ensure environment variables are loaded
-if (!process.env.JWT_SECRET || !process.env.REFRESH_TOKEN_SECRET || !process.env.EMAIL_USER || !process.env.EMAIL_PASS || !process.env.FRONTEND_URL) {
-  console.error('FATAL ERROR: One or more environment variables (JWT_SECRET, REFRESH_TOKEN_SECRET, EMAIL_USER, EMAIL_PASS, FRONTEND_URL) are not defined.');
+// Now checking for DATABASE_URL instead of individual DB_* variables
+if (!process.env.JWT_SECRET || !process.env.REFRESH_TOKEN_SECRET || !process.env.EMAIL_USER || !process.env.EMAIL_PASS || !process.env.FRONTEND_URL || !process.env.DATABASE_URL) {
+  console.error('FATAL ERROR: One or more environment variables (JWT_SECRET, REFRESH_TOKEN_SECRET, EMAIL_USER, EMAIL_PASS, FRONTEND_URL, DATABASE_URL) are not defined.');
   process.exit(1); // Exit the process if critical environment variables are missing
 }
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET;
+
+// PostgreSQL Pool Configuration - Now using DATABASE_URL
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false // Required for some cloud providers like Neon
+  }
+});
 
 // Configure multer for file uploads (user photos)
 const storage = multer.diskStorage({
@@ -62,17 +75,14 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(useragent.express());
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://127.0.0.1:5000', 'https://attendance.unitedsolutionsplus.in'],
+  origin: ['http://localhost:3000', 'http://127.0.0.1:5000', 'http://127.0.0.1:59584','https://attendance.unitedsolutionsplus.in'],
   credentials: true,
 }));
 
 // Serve static profile photos
 app.use('/uploads/profile_photos', express.static('uploads/profile_photos'));
-// Serve static files from dist
-app.use(express.static(path.join(__dirname, '../frontend/dist')));
-
-// Fallback for client-side routing
-
+// Serve static payslip files
+app.use('/uploads/payslips', express.static('uploads/payslips'));
 
 
 // Configure nodemailer transporter
@@ -167,7 +177,7 @@ function getDeviceType(userAgent) {
 app.get('/auth/me', authenticate, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      'SELECT id, name, email, role, employee_id, shift_type, address, mobile_number, kyc_details, profile_photo FROM users WHERE id = $1',
+      'SELECT id, name, email, role, employee_id, shift_type, address, mobile_number, kyc_details, personal_details, family_history, profile_photo FROM users WHERE id = $1',
       [req.user.id]
     );
     if (rows.length === 0) {
@@ -189,19 +199,19 @@ app.post('/auth/login', async (req, res) => {
     const { email, password } = req.body;
     const { rows } = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
     if (rows.length === 0) {
-      return res.status(400).json({ message: 'Invalid credentials.' });
+      return res.status(400).json({ message: 'Invalid credentials' });
     }
     const user = rows[0];
 
     // Ensure password_hash is a string and not empty
     if (typeof user.password_hash !== 'string' || !user.password_hash.trim()) {
       console.error('Login error: Invalid password_hash for user:', user.email);
-      return res.status(400).json({ message: 'Invalid credentials.' });
+      return res.status(400).json({ message: 'Invalid credentials' });
     }
 
     const isPasswordValid = await bcrypt.compare(password, user.password_hash);
     if (!isPasswordValid) {
-      return res.status(400).json({ message: 'Invalid credentials.' });
+      return res.status(400).json({ message: 'Invalid credentials' });
     }
 
     const accessToken = jwt.sign(
@@ -294,7 +304,9 @@ app.post('/auth/logout', authenticate, async (req, res) => {
 
   try {
     // CRITICAL: Delete the refresh token from the database to invalidate the session
-    await pool.query('DELETE FROM sessions WHERE refresh_token = $1', [refreshToken]);
+    // Assuming you have a 'sessions' table or similar for refresh tokens
+    // If not, this line might cause an error. You might need to add a sessions table or remove this.
+    // await pool.query('DELETE FROM sessions WHERE refresh_token = $1', [refreshToken]);
 
     // Clear the HTTP-only cookie
     res.clearCookie('refreshToken', {
@@ -366,7 +378,7 @@ app.post('/auth/reset-password/confirm', async (req, res) => {
     const { token, newPassword } = req.body;
     const decoded = jwt.verify(token, JWT_SECRET); // This will throw if token is invalid/expired
     const hashedPassword = await bcrypt.hash(newPassword, 10);
-    const { rowCount } = await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hashedPassword, decoded.id]);
+    const { rowCount } = await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hashed.id]);
     if (rowCount === 0) {
       return res.status(404).json({ message: 'User not found or token invalid.' });
     }
@@ -377,25 +389,18 @@ app.post('/auth/reset-password/confirm', async (req, res) => {
   }
 });
 
-// This code should be added to your Node.js backend (e.g., index.js)
-// Ensure moment.js is installed and required: const moment = require('moment');
-
-// Employee attendance history and details
-// This code should be added to your Node.js backend (e.g., index.js)
-// Ensure moment.js is installed and required: const moment = require('moment');
-
 // Employee attendance history and details
 // Employee attendance history and details
 app.get('/api/attendance', authenticate, async (req, res) => {
     const user_id = req.user.id;
     const { date, month, year } = req.query;
 
-    console.log(`Backend: Received GET /api/attendance request for user ${user_id}`);
-    console.log(`Backend: Query params - date: ${date}, month: ${month}, year: ${year}`);
+    console.log(`[ATTENDANCE_API_DEBUG] Received GET /api/attendance request for user ${user_id}`);
+    console.log(`[ATTENDANCE_API_DEBUG] Query params - date: ${date}, month: ${month}, year: ${year}`);
 
-    let client = null; // Initialize client to null for safe error handling
+    let client = null;
     try {
-        client = await pool.connect(); // Assign client here
+        client = await pool.connect();
 
         let startDate, endDate;
 
@@ -404,20 +409,19 @@ app.get('/api/attendance', authenticate, async (req, res) => {
             if (!parsedDate.isValid()) {
                 return res.status(400).json({ message: 'Invalid date format provided.' });
             }
-            // For a specific date, ensure we get the full day range in IST
             startDate = parsedDate.tz('Asia/Kolkata').startOf('day');
             endDate = startDate.clone().endOf('day');
-            console.log(`Backend: Fetching attendance for specific date: ${startDate.format('YYYY-MM-DD')}`);
+            console.log(`[ATTENDANCE_API_DEBUG] Fetching attendance for specific date: ${startDate.format('YYYY-MM-DD')}`);
         } else {
             const validMonth = month && parseInt(month, 10) >= 1 && parseInt(month, 10) <= 12 ? parseInt(month, 10) : moment().tz('Asia/Kolkata').month() + 1;
             const validYear = year && parseInt(year, 10) >= 2000 && parseInt(year, 10) <= 2099 ? parseInt(year, 10) : moment().tz('Asia/Kolkata').year();
             startDate = moment([validYear, validMonth - 1, 1]).tz('Asia/Kolkata').startOf('month');
             endDate = startDate.clone().endOf('month');
-            console.log(`Backend: Fetching attendance for month ${validMonth}, year ${validYear}. Range: ${startDate.format('YYYY-MM-DD')} to ${endDate.format('YYYY-MM-DD')}`);
+            console.log(`[ATTENDANCE_API_DEBUG] Fetching attendance for month ${validMonth}, year ${validYear}. Range: ${startDate.format('YYYY-MM-DD')} to ${endDate.format('YYYY-MM-DD')}`);
         }
 
         // Fetch raw attendance data
-        const attendanceResult = await client.query( // Use client here
+        const attendanceResult = await client.query(
             `SELECT
                 id, user_id, date, check_in, check_out, status, late_time,
                 working_hours, extra_hours, check_in_latitude, check_in_longitude,
@@ -425,34 +429,67 @@ app.get('/api/attendance', authenticate, async (req, res) => {
                 reason, admin_comment, created_at, updated_at
             FROM attendance
             WHERE user_id = $1 AND date BETWEEN $2 AND $3
-            ORDER BY date ASC`, // Order by date ASC to ensure correct iteration
+            ORDER BY date ASC`,
             [user_id, startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]
         );
 
-        console.log(`Backend: Raw attendance query returned ${attendanceResult.rows.length} rows.`);
+        console.log(`[ATTENDANCE_API_DEBUG] Raw attendance query returned ${attendanceResult.rows.length} rows.`);
 
         const attendanceMap = new Map(
             attendanceResult.rows.map(att => [moment(att.date).format('YYYY-MM-DD'), att])
         );
 
-        // Fetch holidays and weekly offs
-        const holidayResult = await client.query( // Use client here
-            `SELECT date FROM holidays WHERE date BETWEEN $1 AND $2`,
+        // Fetch holidays
+        const holidayResult = await client.query(
+            `SELECT holiday_date FROM holidays WHERE holiday_date BETWEEN $1 AND $2`,
             [startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]
         );
-        const holidays = new Set(holidayResult.rows.map(row => moment(row.date).format('YYYY-MM-DD')));
+        const holidays = new Set(holidayResult.rows.map(row => moment(row.holiday_date).format('YYYY-MM-DD')));
+        console.log(`[ATTENDANCE_API_DEBUG] Holidays in period:`, Array.from(holidays));
 
-        const weeklyOffResult = await client.query( // Use client here
-            `SELECT day_of_week FROM weekly_offs WHERE user_id = $1 AND start_date <= $3 AND end_date >= $2`,
-            [user_id, startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]
+
+        // Fetch weekly off configurations for the employee that are relevant to the period
+        const weeklyOffsConfigResult = await client.query(
+            `SELECT weekly_off_days, effective_date, end_date FROM weekly_offs
+             WHERE user_id = $1
+             AND effective_date <= $2 -- Configuration must be effective on or before the end of the period
+             ORDER BY effective_date DESC`,
+            [user_id, endDate.format('YYYY-MM-DD')]
         );
-        const userWeeklyOffs = new Set(weeklyOffResult.rows.map(row => row.day_of_week));
+        const weeklyOffsConfigs = weeklyOffsConfigResult.rows;
+        console.log(`[ATTENDANCE_API_DEBUG] Raw weekly_offs_configs from DB (${weeklyOffsConfigs.length} rows):`, weeklyOffsConfigs);
+
+
+        // Create a set of weekly off dates for the current period, considering effective dates
+        const employeeSpecificWeeklyOffDates = new Set();
+        for (let d = startDate.clone(); d.isSameOrBefore(endDate); d.add(1, 'day')) {
+            const currentMomentDayOfWeek = d.day(); // 0 for Sunday, 6 for Saturday
+            const formattedDate = d.format('YYYY-MM-DD');
+
+            // Find the most recent weekly off configuration applicable to 'd'
+            const relevantWeeklyOffConfig = weeklyOffsConfigs
+                .find(row => {
+                    const woEffectiveDate = moment.utc(row.effective_date);
+                    const woEndDate = row.end_date ? moment.utc(row.end_date) : null;
+                    // Check if 'd' is within the effective range of this config
+                    return d.isSameOrAfter(woEffectiveDate, 'day') && (!woEndDate || d.isSameOrBefore(woEndDate, 'day'));
+                });
+
+            let isWeeklyOffForThisDay = false;
+            if (relevantWeeklyOffConfig && Array.isArray(relevantWeeklyOffConfig.weekly_off_days)) {
+                isWeeklyOffForThisDay = relevantWeeklyOffConfig.weekly_off_days.includes(currentMomentDayOfWeek);
+            }
+
+            if (isWeeklyOffForThisDay) {
+                employeeSpecificWeeklyOffDates.add(formattedDate);
+            }
+        }
+        console.log(`[ATTENDANCE_API_DEBUG] Calculated employeeSpecificWeeklyOffDates:`, Array.from(employeeSpecificWeeklyOffDates));
 
 
         // Fetch leave applications
-        const leaveResult = await client.query( // Use client here
-            `SELECT from_date, to_date, status, is_half_day
-             FROM leave_applications
+        const leaveResult = await client.query(
+            `SELECT from_date, to_date, status, is_half_day, leave_type_id FROM leave_applications
              WHERE user_id = $1 AND (
                  from_date BETWEEN $2 AND $3 OR
                  to_date BETWEEN $2 AND $3 OR
@@ -461,22 +498,26 @@ app.get('/api/attendance', authenticate, async (req, res) => {
             [user_id, startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]
         );
 
+        // Fetch leave types to get is_paid status
+        const leaveTypesResult = await client.query('SELECT id, is_paid FROM leave_types');
+        const leaveTypesMap = new Map(leaveTypesResult.rows.map(lt => [lt.id, lt.is_paid]));
+
         const records = [];
-        const userShiftResult = await client.query('SELECT shift_type FROM users WHERE id = $1', [user_id]); // Use client here
+        const userShiftResult = await client.query('SELECT shift_type FROM users WHERE id = $1', [user_id]);
         const userShiftType = userShiftResult.rows[0]?.shift_type || 'day';
         const EXPECTED_SHIFT_START_TIME_DAY = '09:00:00';
         const EXPECTED_SHIFT_START_TIME_EVENING = '18:00:00';
-        const STANDARD_WORKING_HOURS = 8.5; // Define this as a constant or fetch from config
+        const STANDARD_WORKING_HOURS = 8.5;
 
         for (let d = startDate.clone(); d.isSameOrBefore(endDate); d.add(1, 'day')) {
             const targetDate = d.format('YYYY-MM-DD');
-            const dayOfWeek = d.format('dddd'); // e.g., "Monday"
+            const dayOfWeek = d.format('dddd');
 
             let record = {
                 id: null,
                 date: targetDate,
                 day: dayOfWeek,
-                shift: userShiftType, // Use the fetched user's shift type
+                shift: userShiftType,
                 check_in: null,
                 check_out: null,
                 late_time: 0,
@@ -491,106 +532,114 @@ app.get('/api/attendance', authenticate, async (req, res) => {
                 updated_at: null
             };
 
-            const attendance = attendanceMap.get(targetDate);
-            if (attendance) {
-                // Parse raw check_in/check_out from DB (which are TIME types)
-                // Combine date with time and explicitly set timezone to IST
-                const checkInMoment = attendance.check_in ? moment.tz(`${targetDate} ${attendance.check_in}`, 'YYYY-MM-DD HH:mm:ss', 'Asia/Kolkata') : null;
-                let checkOutMoment = attendance.check_out ? moment.tz(`${targetDate} ${attendance.check_out}`, 'YYYY-MM-DD HH:mm:ss', 'Asia/Kolkata') : null;
-
-                const shiftStart = userShiftType === 'evening'
-                    ? moment.tz(`${targetDate} ${EXPECTED_SHIFT_START_TIME_EVENING}`, 'YYYY-MM-DD HH:mm:ss', 'Asia/Kolkata')
-                    : moment.tz(`${targetDate} ${EXPECTED_SHIFT_START_TIME_DAY}`, 'YYYY-MM-DD HH:mm:ss', 'Asia/Kolkata');
-
-                let lateTimeMinutes = 0;
-                let currentStatus = 'ABSENT'; // Re-evaluate status based on actual check-in/out
-
-                if (checkInMoment) {
-                    if (checkInMoment.isAfter(shiftStart)) {
-                        lateTimeMinutes = Math.floor(moment.duration(checkInMoment.diff(shiftStart)).asMinutes());
-                        currentStatus = 'LATE';
-                    } else {
-                        currentStatus = 'PRESENT';
-                    }
-                }
-
-                let workingHours = 0;
-                let extraHours = 0;
-                if (checkInMoment && checkOutMoment) {
-                    // Handle overnight shifts for working hours calculation
-                    if (checkOutMoment.isBefore(checkInMoment)) {
-                        checkOutMoment = checkOutMoment.add(1, 'day');
-                    }
-                    workingHours = parseFloat((checkOutMoment.diff(checkInMoment, 'minutes') / 60).toFixed(2));
-                    if (workingHours > STANDARD_WORKING_HOURS) {
-                        extraHours = parseFloat((workingHours - STANDARD_WORKING_HOURS).toFixed(2));
-                    }
-                }
-
-                record = {
-                    ...record,
-                    id: attendance.id,
-                    // Convert to UTC ISO 8601 string for consistent frontend handling
-                    check_in: checkInMoment ? checkInMoment.utc().format() : null,
-                    check_out: checkOutMoment ? checkOutMoment.utc().format() : null,
-                    late_time: lateTimeMinutes,
-                    working_hours: workingHours,
-                    extra_hours: extraHours,
-                    status: String(attendance.status || currentStatus).replace(/_/g, ' ').toUpperCase(), // Use DB status if exists, else calculated
-                    check_in_device: attendance.check_in_device || null,
-                    check_out_device: attendance.check_out_device || null,
-                    reason: attendance.reason || null,
-                    admin_comment: attendance.admin_comment || null,
-                    created_at: attendance.created_at || null,
-                    updated_at: attendance.updated_at || null
-                };
-            }
-
-            // Apply holiday/weekly off/leave overrides
+            // --- REVISED LOGIC: Prioritize Holiday/Weekly Off/Leave status over attendance records ---
             if (holidays.has(targetDate)) {
                 record.status = 'HOLIDAY';
-                record.check_in = null; record.check_out = null; record.late_time = 0; record.working_hours = 0; record.extra_hours = 0;
-            } else if (userWeeklyOffs.has(dayOfWeek)) {
+            } else if (employeeSpecificWeeklyOffDates.has(targetDate)) {
                 record.status = 'WEEKLY OFF';
-                record.check_in = null; record.check_out = null; record.late_time = 0; record.working_hours = 0; record.extra_hours = 0;
-            }
+            } else {
+                // If not a holiday or weekly off, then check for approved leave
+                const leave = leaveResult.rows.find(l =>
+                    moment(targetDate).isBetween(l.from_date, l.to_date, 'day', '[]') && l.status === 'approved'
+                );
 
-            const leave = leaveResult.rows.find(l =>
-                moment(targetDate).isBetween(l.from_date, l.to_date, 'day', '[]') && l.status === 'approved'
-            );
-            if (leave) {
-                record.status = leave.is_half_day ? 'HALF DAY LEAVE' : 'ON LEAVE';
-                record.check_in = null; record.check_out = null; record.late_time = 0; record.working_hours = 0; record.extra_hours = 0;
+                if (leave) {
+                    const isLeavePaid = leaveTypesMap.get(leave.leave_type_id);
+                    if (isLeavePaid === false) {
+                        record.status = 'LOP';
+                    } else {
+                        record.status = leave.is_half_day ? 'HALF DAY LEAVE' : 'ON LEAVE';
+                    }
+                } else {
+                    // If not a holiday, weekly off, or approved leave, check actual attendance record
+                    const attendance = attendanceMap.get(targetDate);
+                    if (attendance) {
+                        const checkInMoment = attendance.check_in ? moment.tz(`${targetDate} ${attendance.check_in}`, 'YYYY-MM-DD HH:mm:ss', 'Asia/Kolkata') : null;
+                        let checkOutMoment = attendance.check_out ? moment.tz(`${targetDate} ${attendance.check_out}`, 'YYYY-MM-DD HH:mm:ss', 'Asia/Kolkata') : null;
+
+                        const shiftStart = userShiftType === 'evening'
+                            ? moment.tz(`${targetDate} ${EXPECTED_SHIFT_START_TIME_EVENING}`, 'YYYY-MM-DD HH:mm:ss', 'Asia/Kolkata')
+                            : moment.tz(`${targetDate} ${EXPECTED_SHIFT_START_TIME_DAY}`, 'YYYY-MM-DD HH:mm:ss', 'Asia/Kolkata');
+
+                        let lateTimeMinutes = 0;
+                        let currentStatus = 'ABSENT';
+
+                        if (checkInMoment) {
+                            if (checkInMoment.isAfter(shiftStart)) {
+                                lateTimeMinutes = Math.floor(moment.duration(checkInMoment.diff(shiftStart)).asMinutes());
+                                currentStatus = 'LATE';
+                            } else {
+                                currentStatus = 'PRESENT';
+                            }
+                        }
+
+                        let workingHours = 0;
+                        let extraHours = 0;
+                        if (checkInMoment && checkOutMoment) {
+                            if (checkOutMoment.isBefore(checkInMoment)) {
+                                checkOutMoment = checkOutMoment.add(1, 'day');
+                            }
+                            workingHours = parseFloat((checkOutMoment.diff(checkInMoment, 'minutes') / 60).toFixed(2));
+                            if (workingHours > STANDARD_WORKING_HOURS) {
+                                extraHours = parseFloat((workingHours - STANDARD_WORKING_HOURS).toFixed(2));
+                            }
+                        }
+
+                        record = {
+                            ...record,
+                            id: attendance.id,
+                            check_in: checkInMoment ? checkInMoment.utc().format() : null,
+                            check_out: checkOutMoment ? checkOutMoment.utc().format() : null,
+                            late_time: lateTimeMinutes,
+                            working_hours: workingHours,
+                            extra_hours: extraHours,
+                            status: ['PRESENT', 'LATE', 'ABSENT', 'ON_LEAVE', 'LOP', 'HALF-DAY'].includes(attendance.status.toUpperCase()) ?
+                                    String(attendance.status).replace(/_/g, ' ').toUpperCase() : currentStatus,
+                            check_in_device: attendance.check_in_device || null,
+                            check_out_device: attendance.check_out_device || null,
+                            reason: attendance.reason || null,
+                            admin_comment: attendance.admin_comment || null,
+                            created_at: attendance.created_at || null,
+                            updated_at: attendance.updated_at || null
+                        };
+                    } else {
+                        record.status = 'ABSENT';
+                    }
+                }
+            }
+            if (['HOLIDAY', 'WEEKLY OFF', 'ON LEAVE', 'HALF DAY LEAVE', 'LOP'].includes(record.status)) {
+                record.check_in = null;
+                record.check_out = null;
+                record.late_time = 0;
+                record.working_hours = 0;
+                record.extra_hours = 0;
             }
 
             records.push(record);
         }
 
-        console.log(`Backend: Final records array size before sending: ${records.length}`);
+        console.log(`[ATTENDANCE_API_DEBUG] Final records array size before sending: ${records.length}`);
 
         if (date) {
-            // If a specific date was requested, find and return that single record or null
             const singleRecord = records.find(r => r.date === date);
-            console.log(`Backend: Single record found for date ${date}:`, singleRecord);
+            console.log(`[ATTENDANCE_API_DEBUG] Single record found for date ${date}:`, singleRecord);
             res.status(200).json(singleRecord || null);
         } else {
-            // Otherwise, return the full array of records for the month/year
             res.status(200).json(records);
         }
 
     } catch (error) {
-        console.error('Backend: Error in /api/attendance GET route:', error.message, error.stack);
-        // Ensure only one response is sent
+        console.error('[ATTENDANCE_API_ERROR] Error in /api/attendance GET route:', error.message, error.stack);
         if (!res.headersSent) {
             res.status(500).json({ message: `Server error fetching attendance data: ${error.message}` });
         }
     } finally {
-        // Ensure client is released only if it was successfully connected
         if (client) {
             client.release();
         }
     }
 });
+
 
 // Employee check-in endpoint (Already updated for UTC ISO in response)
 app.post('/api/attendance/check-in', authenticate, async (req, res) => {
@@ -863,173 +912,225 @@ app.get('/api/corrections', authenticate, async (req, res) => {
 
 // Leave Application
 app.post('/api/leaves/apply', authenticate, async (req, res) => {
-  const client = await pool.connect(); // Use client for transaction
-  try {
-    const { leave_type_id, from_date, to_date, reason, is_half_day } = req.body;
-    const user_id = req.user.id;
-    const userName = req.user.name;
-    const employeeId = req.user.employee_id;
+    const client = await pool.connect(); // Use client for transaction
+    try {
+        const { leave_type_id, from_date, to_date, reason, is_half_day } = req.body;
+        const user_id = req.user.id;
+        const userName = req.user.name;
+        const employeeId = req.user.employee_id;
 
-    if (!leave_type_id || !from_date || !to_date || !reason) {
-      return res.status(400).json({ message: 'All leave application fields are required.' });
-    }
-    if (!moment(from_date).isValid() || !moment(to_date).isValid() || moment(from_date).isAfter(moment(to_date))) {
-      return res.status(400).json({ message: 'Invalid date range provided.' });
-    }
-
-    await client.query('BEGIN'); // Start transaction
-
-    const leaveTypeResult = await client.query('SELECT name, is_paid FROM leave_types WHERE id = $1', [leave_type_id]);
-    if (leaveTypeResult.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ message: 'Invalid leave type.' });
-    }
-    const leaveType = leaveTypeResult.rows[0];
-
-    // Calculate duration excluding weekends and holidays
-    let duration;
-    if (is_half_day) {
-      duration = 0.5; // If it's a half-day application, the duration is simply 0.5
-    } else {
-      let currentDay = moment(from_date);
-      let calculatedDays = 0;
-      const holidaysResult = await client.query('SELECT date FROM holidays');
-      const holidayDates = new Set(holidaysResult.rows.map(row => moment(row.date).format('YYYY-MM-DD')));
-
-      while (currentDay.isSameOrBefore(moment(to_date))) {
-        const dateStr = currentDay.format('YYYY-MM-DD');
-        const dayOfWeek = currentDay.day(); // 0 for Sunday, 6 for Saturday
-
-        const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
-        const isHoliday = holidayDates.has(dateStr);
-
-        if (!isWeekend && !isHoliday) {
-          calculatedDays += 1; // Count full working days
+        if (!leave_type_id || !from_date || !to_date || !reason) {
+            return res.status(400).json({ message: 'All leave application fields are required.' });
         }
-        currentDay.add(1, 'day');
-      }
-      duration = calculatedDays;
+        if (!moment(from_date).isValid() || !moment(to_date).isValid() || moment(from_date).isAfter(moment(to_date))) {
+            return res.status(400).json({ message: 'Invalid date range provided.' });
+        }
+
+        await client.query('BEGIN'); // Start transaction
+
+        const leaveTypeResult = await client.query('SELECT name, is_paid FROM leave_types WHERE id = $1', [leave_type_id]);
+        if (leaveTypeResult.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ message: 'Invalid leave type.' });
+        }
+        const leaveType = leaveTypeResult.rows[0];
+
+        // Calculate duration excluding weekends and holidays
+        let duration;
+        if (is_half_day) {
+            duration = 0.5; // If it's a half-day application, the duration is simply 0.5
+        } else {
+            let currentDay = moment(from_date);
+            let calculatedDays = 0;
+            // Fetch holidays using the correct column name
+            const holidaysResult = await client.query('SELECT holiday_date FROM holidays');
+            const holidayDates = new Set(holidaysResult.rows.map(row => moment(row.holiday_date).format('YYYY-MM-DD')));
+
+            // Fetch weekly offs for the user
+            const weeklyOffsConfigResult = await client.query(
+                `SELECT weekly_off_days, effective_date FROM weekly_offs WHERE user_id = $1 ORDER BY effective_date DESC`,
+                [user_id]
+            );
+
+            while (currentDay.isSameOrBefore(moment(to_date))) {
+                const dateStr = currentDay.format('YYYY-MM-DD');
+                const dayOfWeek = currentDay.day(); // 0 for Sunday, 6 for Saturday
+
+                let isWeekend = false;
+                // Determine the most recent weekly off configuration for the current date
+                const relevantWeeklyOffConfig = weeklyOffsConfigResult.rows
+                    .filter(row => moment.utc(row.effective_date).isSameOrBefore(currentDay, 'day'))
+                    .sort((a, b) => moment.utc(b.effective_date).diff(moment.utc(a.effective_date)))[0];
+
+                if (relevantWeeklyOffConfig && Array.isArray(relevantWeeklyOffConfig.weekly_off_days)) {
+                    isWeekend = relevantWeeklyOffConfig.weekly_off_days.includes(dayOfWeek);
+                } else {
+                    // Fallback to default weekends if no specific config found or invalid
+                    isWeekend = (dayOfWeek === 0 || dayOfWeek === 6); // Default to Sunday and Saturday
+                }
+
+                const isHoliday = holidayDates.has(dateStr);
+
+                if (!isWeekend && !isHoliday) {
+                    calculatedDays += 1; // Count full working days
+                }
+                currentDay.add(1, 'day');
+            }
+            duration = calculatedDays;
+        }
+
+        // Allow application irrespective of balance. Balance check and deduction happens on approval.
+        const result = await client.query(
+            'INSERT INTO leave_applications (user_id, user_name, employee_id, leave_type_id, from_date, to_date, reason, is_half_day, status, duration) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
+            [user_id, userName, employeeId, leave_type_id, from_date, to_date, reason, is_half_day || false, 'pending', duration]
+        );
+
+        // Notify the user about their application
+        await client.query(
+            'INSERT INTO notifications (user_id, message) VALUES ($1, $2)',
+            [user_id, `Your leave application for ${leaveType.name} from ${from_date} to ${to_date} (${duration} days) has been submitted for approval.`]
+        );
+
+        await client.query('COMMIT'); // Commit transaction
+        res.status(201).json({ message: 'Leave application submitted!', data: result.rows[0] });
+    } catch (error) {
+        await client.query('ROLLBACK'); // Rollback on error
+        console.error('Error applying for leave:', error.message, error.stack);
+        res.status(500).json({ message: 'Server error applying for leave.' });
+    } finally {
+        client.release();
     }
-
-    // Allow application irrespective of balance. Balance check and deduction happens on approval.
-    const result = await client.query(
-      'INSERT INTO leave_applications (user_id, user_name, employee_id, leave_type_id, from_date, to_date, reason, is_half_day, status, duration) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
-      [user_id, userName, employeeId, leave_type_id, from_date, to_date, reason, is_half_day || false, 'pending', duration]
-    );
-
-    // Notify the user about their application
-    await client.query(
-      'INSERT INTO notifications (user_id, message) VALUES ($1, $2)',
-      [user_id, `Your leave application for ${leaveType.name} from ${from_date} to ${to_date} (${duration} days) has been submitted for approval.`]
-    );
-
-    await client.query('COMMIT'); // Commit transaction
-    res.status(201).json({ message: 'Leave application submitted!', data: result.rows[0] });
-  } catch (error) {
-    await client.query('ROLLBACK'); // Rollback on error
-    console.error('Error applying for leave:', error.message, error.stack);
-    res.status(500).json({ message: 'Server error applying for leave.' });
-  } finally {
-    client.release();
-  }
 });
 
 
-// Employee view of their leave applications
+
 // Employee view of their leave applications
 app.get('/api/leaves/my', authenticate, async (req, res) => {
-  const user_id = req.user.id;
-  try {
-    const { rows } = await pool.query(
-      `SELECT
-        la.id,
-        la.user_id,
-        la.leave_type_id,
-        la.from_date,
-        la.to_date,
-        la.duration,
-        la.reason,
-        la.status,
-        la.is_half_day,
-        la.admin_comment,
-        la.cancellation_reason, -- Ensure this column is selected if it exists
-        la.created_at,
-        la.updated_at,
-        lt.name AS leave_type_name
-      FROM leave_applications la
-      JOIN leave_types lt ON CAST(la.leave_type_id AS INTEGER) = lt.id -- Explicitly cast to INTEGER
-      WHERE la.user_id = $1
-      ORDER BY la.created_at DESC`,
-      [user_id]
-    );
-    res.status(200).json(rows); // Use res.status(200).json for consistency
-  } catch (error) {
-    console.error('Error fetching user leave applications:', error.message, error.stack);
-    res.status(500).json({ message: 'Server error fetching leave applications.' });
-  }
-});
+    const user_id = req.user.id;
+    let client; // Declare client here
+    try {
+        client = await pool.connect(); // Assign client here
+        const result = await client.query(
+            `SELECT
+                la.id,
+                la.user_id,
+                la.leave_type_id,
+                la.from_date,
+                la.to_date,
+                la.reason,
+                la.status,
+                la.is_half_day,
+                la.admin_comment,
+                la.cancellation_reason,
+                la.created_at,
+                la.updated_at,
+                lt.name AS leave_type_name,
+                lt.is_paid
+            FROM leave_applications la
+            JOIN leave_types lt ON CAST(la.leave_type_id AS INTEGER) = lt.id
+            WHERE la.user_id = $1
+            ORDER BY la.created_at DESC`,
+            [user_id]
+        );
 
+        // Map over the results to calculate duration_days on the fly
+        const leaveApplications = result.rows.map(app => {
+            const fromDate = moment(app.from_date);
+            const toDate = moment(app.to_date);
+
+            // Calculate duration in days, including both start and end dates
+            // Add 1 to the difference because diff() is exclusive of the end date
+            let calculatedDurationDays = toDate.diff(fromDate, 'days') + 1;
+
+            // Adjust for half-day if applicable
+            if (app.is_half_day && calculatedDurationDays === 1) {
+                calculatedDurationDays = 0.5;
+            } else if (app.is_half_day && calculatedDurationDays > 1) {
+                console.warn(`[LEAVE_DURATION_WARNING] Multi-day leave (${app.id}) is marked as half-day.
+                                Review if this is intended or if half-day applies to a specific part of the leave.`);
+            }
+
+            return {
+                ...app,
+                // Assign the calculated duration to the 'duration' field,
+                // which your frontend table expects.
+                duration: parseFloat(calculatedDurationDays.toFixed(2))
+            };
+        });
+
+        res.status(200).json(leaveApplications);
+    } catch (error) {
+        console.error('Error fetching user leave applications:', error.message, error.stack);
+        res.status(500).json({ message: 'Server error fetching leave applications.' });
+    } finally {
+        if (client) {
+            client.release();
+        }
+    }
+});
 
 // NEW: Public/Employee route to get all leave types (no admin auth required)
 app.get('/api/leaves/types', authenticate, async (req, res) => {
-  try {
-    const result = await pool.query('SELECT id, name, description, is_paid, default_days_per_year FROM leave_types ORDER BY name ASC');
-    res.status(200).json(result.rows);
-  } catch (error) {
-    console.error('Error fetching public leave types:', error);
-    res.status(500).json({ message: 'Server error fetching leave types for employees.' });
-  }
+    try {
+        const result = await pool.query('SELECT id, name, description, is_paid, default_days_per_year FROM leave_types ORDER BY name ASC');
+        res.status(200).json(result.rows);
+    } catch (error) {
+        console.error('Error fetching public leave types:', error);
+        res.status(500).json({ message: 'Server error fetching leave types for employees.' });
+    }
 });
 
 app.post('/leaves/cancel-request', authenticate, async (req, res) => {
   const client = await pool.connect();
-  try {
-    const { leave_id } = req.body;
-    const userId = req.user.id;
+    try {
+        const leave_id = req.params.id; // Get ID from path parameters
+        const userId = req.user.id;
 
-    await client.query('BEGIN'); // Start transaction
+        await client.query('BEGIN'); // Start transaction
 
-    const { rows } = await client.query('SELECT * FROM leave_applications WHERE id = $1 AND user_id = $2 FOR UPDATE', [leave_id, userId]);
-    if (rows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ message: 'Leave request not found or you do not have permission.' });
+        const { rows } = await client.query('SELECT * FROM leave_applications WHERE id = $1 AND user_id = $2 FOR UPDATE', [leave_id, userId]);
+        if (rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ message: 'Leave request not found or you do not have permission.' });
+        }
+        const leave = rows[0];
+
+        if (leave.status !== 'approved') {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ message: 'Only approved leaves can be requested for cancellation.' });
+        }
+        if (leave.status === 'cancellation_pending') {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ message: 'Cancellation request already pending.' });
+        }
+
+        await client.query('UPDATE leave_applications SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', ['cancellation_pending', leave_id]);
+
+        // Notify admin about cancellation request (optional, but good practice)
+        await client.query(
+            'INSERT INTO notifications (user_id, message) VALUES (NULL, $1)', // NULL user_id for global/admin notification
+            [`Leave cancellation request from ${req.user.name} (${req.user.employee_id}) for ${leave.from_date} to ${leave.to_date} is pending.`]
+        );
+
+        await client.query('COMMIT'); // Commit transaction
+        res.json({ message: 'Leave cancellation request submitted successfully.' });
+    } catch (error) {
+        await client.query('ROLLBACK'); // Rollback on error
+        console.error('Leave cancellation request error:', error.message, error.stack);
+        res.status(500).json({ message: 'Server error processing cancellation request.' });
+    } finally {
+        client.release();
     }
-    const leave = rows[0];
-
-    if (leave.status !== 'approved') {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ message: 'Only approved leaves can be requested for cancellation.' });
-    }
-    if (leave.status === 'cancellation_pending') {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ message: 'Cancellation request already pending.' });
-    }
-
-    await client.query('UPDATE leave_applications SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', ['cancellation_pending', leave_id]);
-
-    // Notify admin about cancellation request (optional, but good practice)
-    await client.query(
-      'INSERT INTO notifications (user_id, message) VALUES (NULL, $1)', // NULL user_id for global/admin notification
-      [`Leave cancellation request from ${req.user.name} (${req.user.employee_id}) for ${leave.from_date} to ${leave.to_date} is pending.`]
-    );
-
-    await client.query('COMMIT'); // Commit transaction
-    res.json({ message: 'Leave cancellation request submitted successfully.' });
-  } catch (error) {
-    await client.query('ROLLBACK'); // Rollback on error
-    console.error('Leave cancellation request error:', error.message, error.stack);
-    res.status(500).json({ message: 'Server error processing cancellation request.' });
-  } finally {
-    client.release();
-  }
 });
+
 
 // Holiday Endpoints
 app.get('/api/holidays', authenticate, async (req, res) => {
   try {
     const { year } = req.query;
     const targetYear = year || moment().tz('Asia/Kolkata').year();
-    const { rows } = await pool.query('SELECT * FROM holidays WHERE EXTRACT(YEAR FROM date)=$1 ORDER BY date', [targetYear]);
+    // Corrected column name to holiday_date
+    const { rows } = await pool.query('SELECT * FROM holidays WHERE EXTRACT(YEAR FROM holiday_date)=$1 ORDER BY holiday_date', [targetYear]);
     res.json(rows);
   } catch (error) {
     console.error('Error fetching holidays:', error.message, error.stack);
@@ -1095,8 +1196,8 @@ app.post('/api/users/photo', authenticate, upload.single('photo'), async (req, r
   }
 });
 
-// router.get('/api/analytics', authenticate, async (req, res) => { // If using express.Router
-app.get('/api/analytics', authenticate, async (req, res) => { // If directly in app.js
+// Employee Analytics Endpoint
+app.get('/api/analytics', authenticate, async (req, res) => {
     const { year, month } = req.query;
     const user_id = req.user.id; // Get user ID from authenticated request
 
@@ -1109,138 +1210,30 @@ app.get('/api/analytics', authenticate, async (req, res) => { // If directly in 
         return res.status(400).json({ message: 'Invalid year or month format.' });
     }
 
-    // Set timezone for Moment.js to Asia/Kolkata (IST) for consistency
-    const startDate = moment().tz('Asia/Kolkata').year(parseInt(year)).month(parseInt(month) - 1).startOf('month');
-    const endDate = startDate.clone().endOf('month');
-
-    console.log(`[ANALYTICS DEBUG] Fetching analytics for user: ${user_id}, Period: ${startDate.format('YYYY-MM-DD')} to ${endDate.format('YYYY-MM-DD')}`);
-
     const client = await pool.connect();
     try {
-        let presentDays = 0;
-        let lateDays = 0;
-        let leaveDays = 0;
-        let lopDays = 0;
-        let holidaysCount = 0;
-        let weeklyOffsCount = 0; // This will be calculated from the weekly_offs table
-        let totalWorkingHours = 0;
+        // CALL THE SHARED HELPER FUNCTION
+        const attendanceSummary = await calculateAttendanceSummary(user_id, parseInt(year), parseInt(month), client);
 
-        // Check if required tables exist (optional, but good for robust error handling)
-        const tableCheck = await client.query(`
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables
-                WHERE table_name IN ('attendance', 'leave_applications', 'holidays', 'weekly_offs')
-            ) AS table_exists
-        `);
-        if (!tableCheck.rows[0].table_exists) {
-            throw new Error('Required tables (attendance, leave_applications, holidays, or weekly_offs) are missing.');
-        }
+        // Map the output from calculateAttendanceSummary to the keys expected by your frontend
+        const responseData = {
+            presentDays: attendanceSummary.presentDays,
+            lateDays: attendanceSummary.lateDays,
+            leaveDays: attendanceSummary.leaveDays, // This is onLeaveDays (paid leaves)
+            lopDays: attendanceSummary.lopDays, // This is unpaid leaves
+            holidays: attendanceSummary.holidaysCount,
+            weeklyOffs: attendanceSummary.actualWeeklyOffDays,
+            absentDays: attendanceSummary.absentDays, // Unaccounted absent working days
+            totalWorkingDays: attendanceSummary.totalWorkingDaysInMonth, // Total expected working days
+            totalWorkingHours: attendanceSummary.totalWorkingHours,
+            averageDailyHours: attendanceSummary.averageDailyHours,
+            dailyStatusMap: attendanceSummary.dailyStatusMap // Pass the daily status map
+        };
 
-        // 1. Present Days (Case-insensitive status check from attendance)
-        const presentCountResult = await client.query(
-            `SELECT COUNT(DISTINCT date) FROM attendance WHERE user_id = $1 AND date BETWEEN $2 AND $3 AND UPPER(status) = 'PRESENT'`,
-            [user_id, startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]
-        );
-        presentDays = parseInt(presentCountResult.rows[0].count || 0, 10);
-        console.log(`[ANALYTICS DEBUG] Present Days Query Result:`, presentCountResult.rows[0].count);
+        console.log(`[ANALYTICS DEBUG] Final Analytics Data (from calculateAttendanceSummary):`, responseData);
 
-        // 2. Late Days (Case-insensitive status check from attendance)
-        const lateCountResult = await client.query(
-            `SELECT COUNT(DISTINCT date) FROM attendance WHERE user_id = $1 AND date BETWEEN $2 AND $3 AND UPPER(status) = 'LATE'`,
-            [user_id, startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]
-        );
-        lateDays = parseInt(lateCountResult.rows[0].count || 0, 10);
-        console.log(`[ANALYTICS DEBUG] Late Days Query Result:`, lateCountResult.rows[0].count);
+        res.json(responseData);
 
-        // 3. Leave Days (approved leaves within the period from leave_applications)
-        const leaveCountResult = await client.query(
-            `SELECT COALESCE(SUM(
-                CASE
-                    WHEN from_date <= $3 AND to_date >= $2
-                    THEN (LEAST($3, to_date) - GREATEST($2, from_date) + 1) * (CASE WHEN is_half_day THEN 0.5 ELSE 1 END)
-                    ELSE 0
-                END
-            ), 0) as total_leave_days
-            FROM leave_applications
-            WHERE user_id = $1
-                AND status = 'approved'
-                AND (from_date <= $3 AND to_date >= $2)`,
-            [user_id, startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]
-        );
-        leaveDays = parseFloat(leaveCountResult.rows[0].total_leave_days || 0);
-        console.log(`[ANALYTICS DEBUG] Leave Days Query Result:`, leaveCountResult.rows[0].total_leave_days);
-
-        // 4. LOP Days (Loss of Pay) (Case-insensitive status check from attendance)
-        const lopCountResult = await client.query(
-            `SELECT COUNT(DISTINCT date) FROM attendance WHERE user_id = $1 AND date BETWEEN $2 AND $3 AND UPPER(status) = 'LOP'`,
-            [user_id, startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]
-        );
-        lopDays = parseInt(lopCountResult.rows[0].count || 0, 10);
-        console.log(`[ANALYTICS DEBUG] LOP Days Query Result:`, lopCountResult.rows[0].count);
-
-        // 5. Holidays in the month (from holidays table)
-        const holidayCountResult = await client.query(
-            `SELECT COUNT(*) FROM holidays WHERE date BETWEEN $1 AND $2`,
-            [startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]
-        );
-        holidaysCount = parseInt(holidayCountResult.rows[0].count || 0, 10);
-        console.log(`[ANALYTICS DEBUG] Holidays Count Query Result:`, holidayCountResult.rows[0].count);
-
-        // 6. Weekly Offs in the month (Calculated from weekly_offs table definition)
-        // First, get the user's weekly off days (e.g., 'Monday', 'Sunday')
-        const userWeeklyOffDaysResult = await client.query(
-            `SELECT day_of_week FROM weekly_offs WHERE user_id = $1 AND start_date <= $3 AND end_date >= $2`,
-            [user_id, startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]
-        );
-        const userWeeklyOffDays = new Set(userWeeklyOffDaysResult.rows.map(row => row.day_of_week));
-        console.log(`[ANALYTICS DEBUG] User's configured Weekly Off Days:`, Array.from(userWeeklyOffDays));
-
-        let currentDayIterator = startDate.clone();
-        while (currentDayIterator.isSameOrBefore(endDate)) {
-            // Check if the current day of the week is in the user's defined weekly off days
-            // Moment.js .format('dddd') returns full day name (e.g., 'Monday')
-            if (userWeeklyOffDays.has(currentDayIterator.format('dddd'))) {
-                weeklyOffsCount += 1;
-            }
-            currentDayIterator.add(1, 'day');
-        }
-        console.log(`[ANALYTICS DEBUG] Calculated Weekly Offs Count:`, weeklyOffsCount);
-
-
-        // 7. Total Working Hours (Summing working_hours for PRESENT and LATE days from attendance)
-        const totalWorkingHoursResult = await client.query(
-            `SELECT COALESCE(SUM(working_hours), 0) AS total_hours FROM attendance WHERE user_id = $1 AND date BETWEEN $2 AND $3 AND (UPPER(status) = 'PRESENT' OR UPPER(status) = 'LATE')`,
-            [user_id, startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]
-        );
-        totalWorkingHours = parseFloat(totalWorkingHoursResult.rows[0].total_hours || 0);
-        console.log(`[ANALYTICS DEBUG] Total Working Hours Query Result:`, totalWorkingHoursResult.rows[0].total_hours);
-
-        // Calculate absent days (total days in month - present - late - leaves - holidays - weekly offs - lop)
-        let totalDaysInMonth = endDate.diff(startDate, 'days') + 1;
-        let absentDays = totalDaysInMonth - presentDays - lateDays - leaveDays - holidaysCount - weeklyOffsCount - lopDays;
-        if (absentDays < 0) absentDays = 0; // Prevent negative absent days
-
-        console.log(`[ANALYTICS DEBUG] Final Analytics Data:`, {
-            presentDays,
-            lateDays,
-            leaveDays,
-            lopDays,
-            holidays: holidaysCount,
-            weeklyOffs: weeklyOffsCount,
-            absentDays,
-            totalWorkingHours
-        });
-
-        res.json({
-            presentDays,
-            lateDays,
-            leaveDays,
-            lopDays,
-            holidays: holidaysCount,
-            weeklyOffs: weeklyOffsCount,
-            absentDays,
-            totalWorkingHours
-        });
     } catch (error) {
         console.error('Error in /api/analytics:', error.message, error.stack);
         res.status(500).json({ message: `Server error fetching analytics: ${error.message}` });
@@ -1250,36 +1243,42 @@ app.get('/api/analytics', authenticate, async (req, res) => { // If directly in 
 });
 
 // Leave Balance Endpoint (Employee)
-// Employee view of their leave balances
 app.get('/api/leaves/my-balances', authenticate, async (req, res) => {
-  const user_id = req.user.id;
-  // No need for client.connect() and finally { client.release() } if using pool.query directly
-  // The tableCheck logic is also unnecessary overhead; the query will fail if tables/columns are truly missing.
-  try {
-    const result = await pool.query(`
-      SELECT
-        lb.user_id,                  -- Removed lb.id as it doesn't exist in your schema
-        u.name AS user_name,         -- Added user name from users table
-        u.employee_id,               -- Added employee ID from users table
-        lb.leave_type,
-        lb.current_balance,
-        lb.total_days_allocated,
-        lt.description,
-        lt.is_paid,
-        lt.default_days_per_year,
-        lb.last_updated AS updated_at -- Correctly use last_updated from your schema and alias it to updated_at
-      FROM leave_balances lb
-      JOIN users u ON lb.user_id = u.id -- Join with users table to get user details
-      LEFT JOIN leave_types lt ON lb.leave_type = lt.name -- Keep LEFT JOIN as leave_type is a name
-      WHERE lb.user_id = $1
-      ORDER BY lb.leave_type ASC
-    `, [user_id]);
+    const user_id = req.user.id;
+    try {
+        const result = await pool.query(`
+            SELECT
+                lb.user_id,
+                u.name AS user_name,
+                u.employee_id,
+                lb.leave_type,
+                lb.current_balance,
+                lb.total_days_allocated,
+                lt.description,
+                lt.is_paid,
+                lt.default_days_per_year,
+                lb.last_updated AS updated_at
+            FROM leave_balances lb
+            JOIN users u ON lb.user_id = u.id
+            LEFT JOIN leave_types lt ON lb.leave_type = lt.name
+            WHERE lb.user_id = $1
+            ORDER BY lb.leave_type ASC
+        `, [user_id]);
 
-    res.status(200).json(result.rows); // Changed from res.json(rows) to res.status(200).json(result.rows) for consistency
-  } catch (error) {
-    console.error('Error in /api/leaves/my-balances:', error.message, error.stack);
-    res.status(500).json({ message: `Server error fetching leave balances: ${error.message}` });
-  }
+        // Filter out LOP if current_balance is 0 or less, or if it's not explicitly requested
+        const filteredBalances = result.rows.filter(balance => {
+            if (balance.leave_type === 'LOP') {
+                // Only include LOP if its balance is positive (meaning outstanding LOP days)
+                return parseFloat(balance.current_balance) > 0;
+            }
+            return true; // Include all other leave types
+        });
+
+        res.status(200).json(filteredBalances);
+    } catch (error) {
+        console.error('Error in /api/leaves/my-balances:', error.message, error.stack);
+        res.status(500).json({ message: `Server error fetching leave balances: ${error.message}` });
+    }
 });
 
 // Admin Endpoints
@@ -1314,7 +1313,6 @@ app.post('/admin/register-employee', authenticate, authorizeAdmin, upload.single
 });
 
 // Admin: Get all users with their full profile details
-// This route is updated to include all relevant profile columns
 app.get('/api/admin/users', authenticate, authorizeAdmin, async (req, res) => {
     const client = await pool.connect(); // Get a client from the pool for transaction
     try {
@@ -1337,13 +1335,13 @@ app.get('/api/admin/users', authenticate, authorizeAdmin, async (req, res) => {
                 role,
                 shift_type,
                 address,
-                mobile_number,    -- Included mobile_number
-                kyc_details,      -- Included kyc_details
-                personal_details, -- Included personal_details
-                family_history,   -- Included family_history
+                mobile_number,
+                kyc_details,
+                personal_details,
+                family_history,
                 profile_photo,
                 created_at,
-                updated_at        -- Included updated_at for completeness
+                updated_at
             FROM users
             ORDER BY name ASC
         `);
@@ -1362,7 +1360,6 @@ app.get('/api/admin/users', authenticate, authorizeAdmin, async (req, res) => {
 app.put('/admin/users/:id', authenticate, authorizeAdmin, upload.single('photo'), async (req, res) => {
   try {
     const { id } = req.params;
-    // Added personal_details and family_history to destructuring
     const { name, email, employee_id, role, shift_type, address, mobile_number, kyc_details, personal_details, family_history, password } = req.body;
     const photoFilename = req.file ? req.file.filename : null;
 
@@ -1376,8 +1373,8 @@ app.put('/admin/users/:id', authenticate, authorizeAdmin, upload.single('photo')
       address || '',
       mobile_number || '',
       kyc_details || '',
-      personal_details || '', // Added personal_details
-      family_history || ''    // Added family_history
+      personal_details || '',
+      family_history || ''
     ];
     let paramIndex = queryParams.length + 1;
 
@@ -1415,53 +1412,6 @@ app.put('/admin/users/:id', authenticate, authorizeAdmin, upload.single('photo')
   }
 });
 
-// Admin: Get all users with their full profile details
-// This route is updated to include all relevant profile columns
-app.get('/api/admin/users', authenticate, authorizeAdmin, async (req, res) => {
-    const client = await pool.connect(); // Get a client from the pool for transaction
-    try {
-        const tableCheck = await client.query(`
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables
-                WHERE table_name = 'users'
-            ) AS table_exists
-        `);
-        if (!tableCheck.rows[0].table_exists) {
-            throw new Error('Users table is missing.');
-        }
-
-        const { rows } = await client.query(`
-            SELECT
-                id,
-                name,
-                email,
-                employee_id,
-                role,
-                shift_type,
-                address,
-                mobile_number,    -- Included mobile_number
-                kyc_details,      -- Included kyc_details
-                personal_details, -- Included personal_details
-                family_history,   -- Included family_history
-                profile_photo,
-                created_at,
-                updated_at        -- Included updated_at for completeness
-            FROM users
-            ORDER BY name ASC
-        `);
-        res.json(rows.map(user => ({
-            ...user,
-            profile_photo_url: user.profile_photo ? `/uploads/profile_photos/${user.profile_photo}` : null,
-        })));
-    } catch (error) {
-        console.error('Error in /api/admin/users:', error.message, error.stack);
-        res.status(500).json({ message: `Server error fetching users: ${error.message}` });
-    } finally {
-        client.release(); // Release the client back to the pool
-    }
-});
-
-
 app.delete('/admin/users/:id', authenticate, authorizeAdmin, async (req, res) => {
   const { id } = req.params;
   const client = await pool.connect();
@@ -1475,11 +1425,9 @@ app.delete('/admin/users/:id', authenticate, authorizeAdmin, async (req, res) =>
     await client.query('DELETE FROM leave_balances WHERE user_id = $1', [id]);
     await client.query('DELETE FROM notifications WHERE user_id = $1', [id]);
     await client.query('DELETE FROM weekly_offs WHERE user_id = $1', [id]); // Delete weekly offs
-
-    // --- ADD THESE LINES TO ADDRESS THE FOREIGN KEY CONSTRAINT AND FOR COMPLETENESS ---
     await client.query('DELETE FROM profile_update_requests WHERE user_id = $1', [id]);
-    await client.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [id]);
-    // ----------------------------------------------------------------------------------
+    // If you have a password_reset_tokens table, uncomment this:
+    // await client.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [id]);
 
     const result = await client.query('DELETE FROM users WHERE id = $1 RETURNING id, profile_photo', [id]);
     if (result.rows.length === 0) {
@@ -1508,14 +1456,14 @@ app.delete('/admin/users/:id', authenticate, authorizeAdmin, async (req, res) =>
 });
 
 app.post('/api/admin/holidays', authenticate, authorizeAdmin, async (req, res) => {
-  const { date, name } = req.body;
-  if (!date || !name) {
+  const { holiday_date, holiday_name } = req.body; // Corrected to holiday_date, holiday_name
+  if (!holiday_date || !holiday_name) {
     return res.status(400).json({ message: 'Date and name are required for a holiday.' });
   }
   try {
     const result = await pool.query(
-      'INSERT INTO holidays (date, name) VALUES ($1, $2) RETURNING *',
-      [date, name]
+      'INSERT INTO holidays (holiday_date, holiday_name) VALUES ($1, $2) RETURNING *',
+      [holiday_date, holiday_name]
     );
     res.status(201).json(result.rows[0]);
   } catch (error) {
@@ -1526,7 +1474,8 @@ app.post('/api/admin/holidays', authenticate, authorizeAdmin, async (req, res) =
 
 app.get('/api/admin/holidays', authenticate, authorizeAdmin, async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM holidays ORDER BY date ASC');
+    // Corrected to holiday_date
+    const { rows } = await pool.query('SELECT * FROM holidays ORDER BY holiday_date ASC');
     res.json(rows);
   } catch (error) {
     console.error('Error fetching holidays:', error.message, error.stack);
@@ -1610,10 +1559,9 @@ app.get('/api/admin/leaves', authenticate, authorizeAdmin, async (req, res) => {
                 la.cancellation_reason,
                 la.created_at,
                 la.updated_at
-                -- Removed reviewed_by and reviewed_at as they do not exist in leave_applications table
             FROM leave_applications la
             JOIN users u ON la.user_id = u.id
-            JOIN leave_types lt ON CAST(la.leave_type_id AS INTEGER) = lt.id -- Explicitly cast to INTEGER
+            JOIN leave_types lt ON CAST(la.leave_type_id AS INTEGER) = lt.id
             ORDER BY la.created_at DESC
         `);
         res.status(200).json(result.rows);
@@ -1626,202 +1574,257 @@ app.get('/api/admin/leaves', authenticate, authorizeAdmin, async (req, res) => {
 
 
 app.put('/api/admin/leaves/:id/status', authenticate, authorizeAdmin, async (req, res) => {
-        const { id } = req.params;
-        const { status, admin_comment } = req.body;
-        const adminId = req.user.id; // ID of the admin performing the action
+    const { id } = req.params;
+    const { status, admin_comment } = req.body;
+    const adminId = req.user.id; // ID of the admin performing the action
 
-        // Validate incoming status
-        if (!status || !['approved', 'rejected', 'cancelled', 'cancellation_rejected'].includes(status)) {
-            return res.status(400).json({ message: 'Invalid status provided.' });
+    // Validate incoming status
+    if (!status || !['approved', 'rejected', 'cancelled', 'cancellation_rejected'].includes(status)) {
+        return res.status(400).json({ message: 'Invalid status provided.' });
+    }
+
+    const client = await pool.connect(); // Get a client from the pool for transaction
+    try {
+        await client.query('BEGIN'); // Start transaction
+
+        // 1. Fetch the current leave application details and lock the row
+        const leaveAppResult = await client.query('SELECT * FROM leave_applications WHERE id = $1 FOR UPDATE', [id]);
+        if (leaveAppResult.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ message: 'Leave application not found.' });
+        }
+        const leaveApplication = leaveAppResult.rows[0];
+        const userId = leaveApplication.user_id;
+        const employeeId = leaveApplication.employee_id; // Assuming employee_id is directly on leave_applications table
+        const fromDate = moment(leaveApplication.from_date, 'YYYY-MM-DD');
+        const toDate = moment(leaveApplication.to_date, 'YYYY-MM-DD');
+
+        // Fetch leave type details - Ensure leave_type_id from leave_applications is cast to INTEGER to match leave_types.id
+        const leaveTypeResult = await client.query('SELECT name, is_paid FROM leave_types WHERE id = CAST($1 AS INTEGER)', [leaveApplication.leave_type_id]);
+        if (leaveTypeResult.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ message: 'Associated leave type not found.' });
+        }
+        const leaveType = leaveTypeResult.rows[0];
+        const leaveTypeName = leaveType.name;
+        let isPaidLeave = leaveType.is_paid; // Use 'let' as we might modify this
+        const leaveDuration = parseFloat(leaveApplication.duration); // Ensure duration is a number
+        console.log(typeof leaveDuration, leaveDuration); // Should say: number 1.5 (or whatever)
+
+        if (isNaN(leaveDuration)) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ message: 'Invalid leave duration found for application.' });
         }
 
-        const client = await pool.connect(); // Get a client from the pool for transaction
-        try {
-            await client.query('BEGIN'); // Start transaction
+        // Fetch holidays and user's weekly offs for the leave period
+        const holidaysResult = await client.query('SELECT holiday_date FROM holidays WHERE holiday_date BETWEEN $1 AND $2', [fromDate.format('YYYY-MM-DD'), toDate.format('YYYY-MM-DD')]);
+        const holidayDates = new Set(holidaysResult.rows.map(row => moment(row.holiday_date).format('YYYY-MM-DD')));
 
-            // 1. Fetch the current leave application details and lock the row
-            const leaveAppResult = await client.query('SELECT * FROM leave_applications WHERE id = $1 FOR UPDATE', [id]);
-            if (leaveAppResult.rows.length === 0) {
-                await client.query('ROLLBACK');
-                return res.status(404).json({ message: 'Leave application not found.' });
-            }
-            const leaveApplication = leaveAppResult.rows[0];
-            const userId = leaveApplication.user_id;
-            const employeeId = leaveApplication.employee_id; // Assuming employee_id is directly on leave_applications table
-            const fromDate = moment(leaveApplication.from_date, 'YYYY-MM-DD');
-            const toDate = moment(leaveApplication.to_date, 'YYYY-MM-DD');
+        // Fetch weekly offs for the user that are active during the leave period
+        const userWeeklyOffsResult = await client.query(
+            `SELECT weekly_off_days, effective_date FROM weekly_offs WHERE user_id = $1 AND effective_date <= $2 ORDER BY effective_date DESC`,
+            [userId, toDate.format('YYYY-MM-DD')]
+        );
 
-            // Fetch leave type details - Ensure leave_type_id from leave_applications is cast to INTEGER to match leave_types.id
-            const leaveTypeResult = await client.query('SELECT name, is_paid FROM leave_types WHERE id = CAST($1 AS INTEGER)', [leaveApplication.leave_type_id]);
-            if (leaveTypeResult.rows.length === 0) {
-                await client.query('ROLLBACK');
-                return res.status(400).json({ message: 'Associated leave type not found.' });
-            }
-            const leaveType = leaveTypeResult.rows[0];
-            const leaveTypeName = leaveType.name;
-            const isPaidLeave = leaveType.is_paid;
-            const leaveDuration = parseFloat(leaveApplication.duration); // Ensure duration is a number
-            console.log(typeof leaveDuration, leaveDuration); // Should say: number 1.5 (or whatever)
+        let newLeaveStatus = status;
+        let notificationMessage = '';
+        let notificationType = '';
+        let processedAsPaidFlag = null; // New flag to store final paid/unpaid status for the leave application
 
-            if (isNaN(leaveDuration)) {
-                await client.query('ROLLBACK');
-                return res.status(400).json({ message: 'Invalid leave duration found for application.' });
-            }
+        // --- Handle Status Transitions and Balance Adjustments ---
+        if (status === 'approved') {
+            // Only deduct balance if the leave was pending (not already approved)
+            if (leaveApplication.status === 'pending') {
+                // --- START LOGIC: Check balance for paid leaves and convert to LOP if insufficient ---
+                if (isPaidLeave) { // Only perform balance check if the leave type is inherently paid
+                    const balanceResult = await client.query(
+                        'SELECT current_balance FROM leave_balances WHERE user_id = $1 AND leave_type = $2',
+                        [userId, leaveTypeName]
+                    );
 
-            // Fetch holidays and user's weekly offs for the leave period
-            const holidaysResult = await client.query('SELECT date FROM holidays WHERE date BETWEEN $1 AND $2', [fromDate.format('YYYY-MM-DD'), toDate.format('YYYY-MM-DD')]);
-            const holidayDates = new Set(holidaysResult.rows.map(row => moment(row.date).format('YYYY-MM-DD')));
-
-            const userWeeklyOffsResult = await client.query('SELECT day_of_week FROM weekly_offs WHERE user_id = $1', [userId]);
-            const userWeeklyOffDays = new Set(userWeeklyOffsResult.rows.map(row => row.day_of_week));
-
-            let newLeaveStatus = status;
-            let notificationMessage = '';
-            let notificationType = '';
-
-            // --- Handle Status Transitions and Balance Adjustments ---
-            if (status === 'approved') {
-                // Only deduct balance if the leave was pending (not already approved)
-                if (leaveApplication.status === 'pending') {
-                    if (isPaidLeave) {
-                        // Corrected: Pass negative leaveDuration explicitly cast to NUMERIC(5,1)
-                        // Then, add EXCLUDED.current_balance (which is now negative) to current_balance
-                        await client.query(
-                            `INSERT INTO leave_balances (user_id, leave_type, current_balance, total_days_allocated)
-                              VALUES ($1, $2, CAST($3 AS NUMERIC(5,1)) * -1, 0)
-                             ON CONFLICT (user_id, leave_type) DO UPDATE SET
-                                 current_balance = leave_balances.current_balance + EXCLUDED.current_balance,
-                                 last_updated = CURRENT_TIMESTAMP;`,
-                            [userId, leaveTypeName, leaveDuration]
-                        );
+                    let employeeCurrentBalance = 0;
+                    if (balanceResult.rows.length > 0) {
+                        employeeCurrentBalance = parseFloat(balanceResult.rows[0].current_balance);
                     }
+                    console.log(`[LEAVE_APPROVAL_DEBUG] User ${userId}, Leave Type: ${leaveTypeName}, Current Balance: ${employeeCurrentBalance}, Duration: ${leaveDuration}`);
 
-                    // Mark attendance as 'on_leave' for working days within the period
-                    let currentDay = fromDate.clone();
-                    while (currentDay.isSameOrBefore(toDate)) {
-                        const dateStr = currentDay.format('YYYY-MM-DD');
-                        const dayOfWeek = currentDay.day(); // 0 for Sunday, 6 for Saturday
-
-                        const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
-                        const isHoliday = holidayDates.has(dateStr);
-                        const isWeeklyOff = userWeeklyOffDays.has(currentDay.format('dddd'));
-
-                        if (!isWeekend && !isHoliday && !isWeeklyOff) {
-                            // Only mark if not already 'present' (e.g., if they checked in before leave was approved)
-                            await client.query(
-                                `INSERT INTO attendance (user_id, employee_id, date, status)
-                                 VALUES ($1, $2, $3, $4)
-                                 ON CONFLICT (user_id, date) DO UPDATE SET status = EXCLUDED.status
-                                 WHERE attendance.status != 'present';`, // Only update if current status is not 'present'
-                                [userId, employeeId, dateStr, (isPaidLeave ? 'on_leave' : 'lop')] // Use 'lop' for unpaid leave
-                            );
-                        }
-                        currentDay.add(1, 'day');
+                    // If employee balance is less than the leave duration, convert to unpaid leave
+                    if (employeeCurrentBalance < leaveDuration) {
+                        isPaidLeave = false; // Force it to be unpaid leave (LOP) for this approval
+                        console.log(`[LEAVE_APPROVAL_DEBUG] Insufficient balance. Leave for user ${userId} (${leaveDuration} days) converted to unpaid (LOP).`);
                     }
                 }
-                notificationMessage = `Your leave application for ${leaveApplication.from_date} to ${leaveApplication.to_date} (${leaveTypeName}) has been approved.`;
-                notificationType = 'leave_approved';
+                // --- END LOGIC ---
 
-            } else if (status === 'rejected') {
-                notificationMessage = `Your leave application for ${leaveApplication.from_date} to ${leaveApplication.to_date} (${leaveTypeName}) has been rejected. Admin comment: ${admin_comment || 'No comment provided.'}`;
-                notificationType = 'leave_rejected';
+                if (isPaidLeave) { // This 'isPaidLeave' now reflects the actual status after balance check
+                    // Deduct from the specific leave type balance
+                    await client.query(
+                        `INSERT INTO leave_balances (user_id, leave_type, current_balance, total_days_allocated)
+                         VALUES ($1, $2, -$3, 0) -- If new record, current_balance starts as negative of leaveDuration
+                         ON CONFLICT (user_id, leave_type) DO UPDATE SET
+                             current_balance = leave_balances.current_balance - $3, -- Subtract leaveDuration from existing balance
+                             last_updated = CURRENT_TIMESTAMP;`,
+                        [userId, leaveTypeName, leaveDuration] // $3 is leaveDuration
+                    );
+                    processedAsPaidFlag = true; // Mark as processed as paid
+                } else {
+                    processedAsPaidFlag = false; // Mark as processed as unpaid (LOP)
+                }
 
-                // If rejected, mark all affected working days as 'absent' if they were not already present
+                // Mark attendance for each day of the leave
                 let currentDay = fromDate.clone();
                 while (currentDay.isSameOrBefore(toDate)) {
                     const dateStr = currentDay.format('YYYY-MM-DD');
-                    const dayOfWeek = currentDay.day();
-                    const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
-                    const isHoliday = holidayDates.has(dateStr);
-                    const isWeeklyOff = userWeeklyOffDays.has(currentDay.format('dddd'));
+                    const dayOfWeek = currentDay.day(); // 0 for Sunday, 6 for Saturday
 
-                    if (!isWeekend && !isHoliday && !isWeeklyOff) {
+                    // Determine the most recent weekly off configuration for the current date
+                    const relevantWeeklyOffConfig = userWeeklyOffsResult.rows
+                        .filter(row => moment.utc(row.effective_date).isSameOrBefore(currentDay, 'day'))
+                        .sort((a, b) => moment.utc(b.effective_date).diff(moment.utc(a.effective_date)))[0];
+
+                    let isWeeklyOffForThisDay = false;
+                    if (relevantWeeklyOffConfig && Array.isArray(relevantWeeklyOffConfig.weekly_off_days)) {
+                        const woEffectiveDate = moment.utc(relevantWeeklyOffConfig.effective_date);
+                        const woEndDate = relevantWeeklyOffConfig.end_date ? moment.utc(relevantWeeklyOffConfig.end_date) : null;
+
+                        isWeeklyOffForThisDay = relevantWeeklyOffConfig.weekly_off_days.includes(dayOfWeek) &&
+                                                currentDay.isSameOrAfter(woEffectiveDate, 'day') &&
+                                                (!woEndDate || currentDay.isSameOrBefore(woEndDate, 'day'));
+                    }
+
+                    const isHoliday = holidayDates.has(dateStr);
+
+                    if (!isWeeklyOffForThisDay && !isHoliday) { // Only mark attendance for actual working days
                         await client.query(
-                            `INSERT INTO attendance (user_id, employee_id, date, status) VALUES ($1, $2, $3, $4)
-                             ON CONFLICT (user_id, date) DO UPDATE SET status = $4 WHERE attendance.status != 'present'`,
-                            [userId, employeeId, dateStr, 'absent']
+                            `INSERT INTO attendance (user_id, employee_id, date, status)
+                             VALUES ($1, $2, $3, $4)
+                             ON CONFLICT (user_id, date) DO UPDATE SET status = EXCLUDED.status
+                             WHERE attendance.status != 'present';`, // Only update if current status is not 'present'
+                            [userId, employeeId, dateStr, (isPaidLeave ? 'on_leave' : 'lop')] // Use 'lop' for unpaid leave
                         );
                     }
                     currentDay.add(1, 'day');
                 }
+            }
+            notificationMessage = `Your leave application for ${leaveApplication.from_date} to ${leaveApplication.to_date} (${leaveTypeName}) has been approved.`;
+            notificationType = 'leave_approved';
 
-            } else if (status === 'cancelled') {
-                // This status is typically set when an 'approved' leave is cancelled by admin or employee request is approved
-                // Only refund balance if the leave was previously approved (or cancellation pending for an approved leave)
-                if (leaveApplication.status === 'approved' || leaveApplication.status === 'cancellation_pending') {
-                    if (isPaidLeave) {
-                        // Corrected: Pass positive leaveDuration explicitly cast to NUMERIC(5,1)
-                        // Then, add EXCLUDED.current_balance (which is now positive) to current_balance
-                        await client.query(
-                            `INSERT INTO leave_balances (user_id, leave_type, current_balance, total_days_allocated)
-                             VALUES ($1, $2, CAST($3 AS NUMERIC(5,1)), 0)
-                             ON CONFLICT (user_id, leave_type) DO UPDATE SET
-                                 current_balance = leave_balances.current_balance + EXCLUDED.current_balance,
-                                 last_updated = CURRENT_TIMESTAMP;`,
-                            [userId, leaveTypeName, leaveDuration]
-                        );
-                    }
-                    // Delete 'on_leave' or 'lop' attendance records for the cancelled period
-                    let currentDay = fromDate.clone();
-                    while (currentDay.isSameOrBefore(toDate)) {
-                        const dateStr = currentDay.format('YYYY-MM-DD');
-                        const dayOfWeek = currentDay.day();
-                        const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
-                        const isHoliday = holidayDates.has(dateStr);
-                        const isWeeklyOff = userWeeklyOffDays.has(currentDay.format('dddd'));
+        } else if (status === 'rejected') {
+            notificationMessage = `Your leave application for ${leaveApplication.from_date} to ${leaveApplication.to_date} (${leaveTypeName}) has been rejected. Admin comment: ${admin_comment || 'No comment provided.'}`;
+            notificationType = 'leave_rejected';
 
-                        if (!isWeekend && !isHoliday && !isWeeklyOff) {
-                            await client.query(
-                                `DELETE FROM attendance WHERE user_id = $1 AND date = $2 AND status IN ('on_leave', 'lop')`,
-                                [userId, dateStr]
-                            );
-                        }
-                        currentDay.add(1, 'day');
-                    }
+            // If rejected, mark all affected working days as 'absent' if they were not already present
+            let currentDay = fromDate.clone();
+            while (currentDay.isSameOrBefore(toDate)) {
+                const dateStr = currentDay.format('YYYY-MM-DD');
+                const dayOfWeek = currentDay.day();
+
+                // Determine the most recent weekly off configuration for the current date
+                const relevantWeeklyOffConfig = userWeeklyOffsResult.rows
+                    .filter(row => moment.utc(row.effective_date).isSameOrBefore(currentDay, 'day'))
+                    .sort((a, b) => moment.utc(b.effective_date).diff(moment.utc(a.effective_date)))[0];
+
+                let isWeeklyOffForThisDay = false;
+                if (relevantWeeklyOffConfig && Array.isArray(relevantWeeklyOffConfig.weekly_off_days)) {
+                    isWeeklyOffForThisDay = relevantWeeklyOffConfig.weekly_off_days.includes(dayOfWeek);
                 }
-                notificationMessage = `Your leave application for ${leaveApplication.from_date} to ${leaveApplication.to_date} (${leaveTypeName}) has been cancelled.`;
-                notificationType = 'leave_cancelled';
 
-            } else if (status === 'cancellation_rejected') {
-                // If cancellation is rejected, revert the leave status back to 'approved'
-                newLeaveStatus = 'approved';
-                notificationMessage = `Your leave cancellation request for ${leaveApplication.from_date} to ${leaveApplication.to_date} (${leaveTypeName}) has been rejected. Your leave remains approved. Admin comment: ${admin_comment || 'No comment provided.'}`;
-                notificationType = 'cancellation_rejected';
-                // No balance or attendance changes needed as it reverts to approved state
+                const isHoliday = holidayDates.has(dateStr);
+
+                if (!isWeeklyOffForThisDay && !isHoliday) {
+                    await client.query(
+                        `INSERT INTO attendance (user_id, employee_id, date, status) VALUES ($1, $2, $3, $4)
+                         ON CONFLICT (user_id, date) DO UPDATE SET status = $4 WHERE attendance.status != 'present'`,
+                        [userId, employeeId, dateStr, 'absent']
+                    );
+                }
+                currentDay.add(1, 'day');
             }
 
-            // 2. Update the leave application status in the 'leaves' table
-            const updateLeaveQuery = `
-                UPDATE leave_applications
-                SET status = $1, admin_comment = $2
-                -- Removed reviewed_by and reviewed_at as they do not exist in leave_applications table
-                WHERE id = $3
-                RETURNING *;
-            `;
-            // Note: adminId is no longer passed to the query as reviewed_by is removed
-            const result = await client.query(updateLeaveQuery, [newLeaveStatus, admin_comment || null, id]);
+        } else if (status === 'cancelled') {
+            // This status is typically set when an 'approved' leave is cancelled by admin or employee request is approved
+            // Only refund balance if the leave was previously approved (or cancellation pending for an approved leave)
+            if (leaveApplication.status === 'approved' || leaveApplication.status === 'cancellation_pending') {
+                // Check if the leave was originally processed as paid
+                if (leaveApplication.is_processed_as_paid === true) { // Only refund if it was actually paid
+                    // Refund to the specific leave type balance
+                    await client.query(
+                        `INSERT INTO leave_balances (user_id, leave_type, current_balance, total_days_allocated)
+                         VALUES ($1, $2, $3, 0) -- If new record, add duration for refund
+                         ON CONFLICT (user_id, leave_type) DO UPDATE SET
+                             current_balance = leave_balances.current_balance + EXCLUDED.current_balance,
+                             last_updated = CURRENT_TIMESTAMP;`,
+                        [userId, leaveTypeName, leaveDuration] // Add leaveDuration back
+                    );
+                }
+                // Delete 'on_leave' or 'lop' attendance records for the cancelled period
+                let currentDay = fromDate.clone();
+                while (currentDay.isSameOrBefore(toDate)) {
+                    const dateStr = currentDay.format('YYYY-MM-DD');
+                    const dayOfWeek = currentDay.day();
 
-            // 3. Create a notification for the employee
-            await client.query(
-                `INSERT INTO notifications (user_id, message, is_read, is_admin_notification, type)
-                 VALUES ($1, $2, FALSE, TRUE, $3);`,
-                [userId, notificationMessage, notificationType]
-            );
+                    // Determine the most recent weekly off configuration for the current date
+                    const relevantWeeklyOffConfig = userWeeklyOffsResult.rows
+                        .filter(row => moment.utc(row.effective_date).isSameOrBefore(currentDay, 'day'))
+                        .sort((a, b) => moment.utc(b.effective_date).diff(moment.utc(a.effective_date)))[0];
 
-            await client.query('COMMIT'); // Commit transaction
-            res.status(200).json({ message: 'Leave application status updated successfully.', leave: result.rows[0] });
+                    let isWeeklyOffForThisDay = false;
+                    if (relevantWeeklyOffConfig && Array.isArray(relevantWeeklyOffConfig.weekly_off_days)) {
+                        isWeeklyOffForThisDay = relevantWeeklyOffConfig.weekly_off_days.includes(dayOfWeek);
+                    }
 
-        } catch (error) {
-            await client.query('ROLLBACK'); // Rollback transaction on error
-            console.error('Error updating leave application status:', error);
-            res.status(500).json({ message: 'Server error updating leave application status: ' + (error.message || 'unknown error') });
-        } finally {
-            client.release(); // Release the client back to the pool
+                    const isHoliday = holidayDates.has(dateStr);
+
+                    if (!isWeeklyOffForThisDay && !isHoliday) {
+                        await client.query(
+                            `DELETE FROM attendance WHERE user_id = $1 AND date = $2 AND status IN ('on_leave', 'lop')`,
+                            [userId, dateStr]
+                        );
+                    }
+                    currentDay.add(1, 'day');
+                }
+            }
+            notificationMessage = `Your leave application for ${leaveApplication.from_date} to ${leaveApplication.to_date} (${leaveTypeName}) has been cancelled.`;
+            notificationType = 'leave_cancelled';
+
+        } else if (status === 'cancellation_rejected') {
+            // If cancellation is rejected, revert the leave status back to 'approved'
+            newLeaveStatus = 'approved';
+            notificationMessage = `Your leave cancellation request for ${leaveApplication.from_date} to ${leaveApplication.to_date} (${leaveTypeName}) has been rejected. Your leave remains approved. Admin comment: ${admin_comment || 'No comment provided.'}`;
+            notificationType = 'cancellation_rejected';
+            // No balance or attendance changes needed as it reverts to approved state
         }
-    });
+
+        // 2. Update the leave application status in the 'leaves' table
+        // IMPORTANT: Also update the new is_processed_as_paid flag
+        const updateLeaveQuery = `
+            UPDATE leave_applications
+            SET status = $1, admin_comment = $2, is_processed_as_paid = $4
+            WHERE id = $3
+            RETURNING *;
+        `;
+        const result = await client.query(updateLeaveQuery, [newLeaveStatus, admin_comment || null, id, processedAsPaidFlag]);
+
+        // 3. Create a notification for the employee
+        await client.query(
+            `INSERT INTO notifications (user_id, message, is_read, is_admin_notification, type)
+             VALUES ($1, $2, FALSE, TRUE, $3);`,
+            [userId, notificationMessage, notificationType]
+        );
+
+        await client.query('COMMIT'); // Commit transaction
+        res.status(200).json({ message: 'Leave application status updated successfully.', leave: result.rows[0] });
+
+    } catch (error) {
+        await client.query('ROLLBACK'); // Rollback transaction on error
+        console.error('Error updating leave application status:', error);
+        res.status(500).json({ message: 'Server error updating leave application status: ' + (error.message || 'unknown error') });
+    } finally {
+        client.release(); // Release the client back to the pool
+    }
+});
 
 // Admin: Get all leave balances for all employees
-// This route is called by AdminLeaveManagement.js to populate the leave balances table
 app.get('/api/admin/leave-balances', authenticate, authorizeAdmin, async (req, res) => {
     try {
         const result = await pool.query(`
@@ -1869,14 +1872,11 @@ app.put('/api/admin/leave-balances/:userId', authenticate, authorizeAdmin, async
     }
 });
 
-// Admin: Adjust an employee's leave balance (POST route for specific operations)
-// Admin: Adjust an employee's leave balance (POST route for specific operations)
 // Employee: Request cancellation of an approved leave
 app.put('/api/leaves/:id/request-cancellation', authenticate, async (req, res) => {
     const { id } = req.params;
     const user_id = req.user.id; // User making the request
-    // Safely destructure cancellation_reason from req.body, providing a default empty object
-    const { cancellation_reason } = req.body || {}; // MODIFIED: Added || {} to prevent destructuring undefined
+    const { cancellation_reason } = req.body || {};
 
     const client = await pool.connect();
     try {
@@ -1942,32 +1942,24 @@ app.put('/api/leaves/:id/request-cancellation', authenticate, async (req, res) =
 });
 
 app.post('/api/admin/leave-balances', authenticate, authorizeAdmin, async (req, res) => {
-  // user_id: ID of the employee
-  // leave_type: Name of the leave type (e.g., 'Medical Leaves', 'Earned Leaves')
-  // amount: The *new calculated balance* to set (from frontend's calculation)
-  // total_days_allocated: The *new calculated total allocated* to set (from frontend's calculation)
-  // operation: 'set_all' (indicates frontend has calculated and is sending final values) - this field is now informational for logging
-  const { user_id, leave_type, amount, total_days_allocated, operation } = req.body; // 'operation' is received but no longer strictly validated here
+  const { user_id, leave_type, amount, total_days_allocated, operation } = req.body;
 
   console.log(`DEBUG Backend: Received POST request to adjust leave balance for user_id: ${user_id}`);
   console.log("DEBUG Backend: Received data:", { leave_type, amount, total_days_allocated, operation });
 
-  // Validate essential fields. The 'operation' field's specific value is no longer critical here.
   if (!user_id || !leave_type || amount === undefined || total_days_allocated === undefined) {
     return res.status(400).json({ message: 'User ID, leave type, amount, and total_days_allocated are required.' });
   }
 
   try {
-    await pool.query('BEGIN'); // Start a transaction for atomicity
+    await pool.query('BEGIN');
 
-    // Check if a balance record already exists for this user_id and leave_type
     const existingBalance = await pool.query(
-      'SELECT * FROM leave_balances WHERE user_id = $1 AND leave_type = $2 FOR UPDATE', // FOR UPDATE locks the row
+      'SELECT * FROM leave_balances WHERE user_id = $1 AND leave_type = $2 FOR UPDATE',
       [user_id, leave_type]
     );
 
     if (existingBalance.rows.length > 0) {
-      // Update existing record with the provided final 'amount' and 'total_days_allocated'
       const updateQuery = `
         UPDATE leave_balances
         SET current_balance = $1, total_days_allocated = $2, last_updated = CURRENT_TIMESTAMP
@@ -1976,7 +1968,6 @@ app.post('/api/admin/leave-balances', authenticate, authorizeAdmin, async (req, 
       `;
       await pool.query(updateQuery, [amount, total_days_allocated, user_id, leave_type]);
     } else {
-      // Insert new record if it doesn't exist, using the provided values
       const insertQuery = `
         INSERT INTO leave_balances (user_id, leave_type, current_balance, total_days_allocated)
         VALUES ($1, $2, $3, $4) RETURNING *;
@@ -1984,13 +1975,13 @@ app.post('/api/admin/leave-balances', authenticate, authorizeAdmin, async (req, 
       await pool.query(insertQuery, [user_id, leave_type, amount, total_days_allocated]);
     }
 
-    await pool.query('COMMIT'); // Commit the transaction
+    await pool.query('COMMIT');
 
     console.log("DEBUG Backend: Leave balance adjusted successfully.");
     res.status(200).json({ message: 'Leave balance adjusted successfully!' });
 
   } catch (error) {
-    await pool.query('ROLLBACK'); // Rollback on error
+    await pool.query('ROLLBACK');
     console.error("ERROR Backend: Adjust Leave Balance Error:", error.message, error.stack);
     res.status(500).json({ message: 'Server error adjusting leave balance.' });
   }
@@ -1998,35 +1989,32 @@ app.post('/api/admin/leave-balances', authenticate, authorizeAdmin, async (req, 
 
 
 // Admin: Delete a leave balance record
-app.delete('/api/admin/leave-balances/:id', authenticate, authorizeAdmin, async (req, res) => {
-  const { id } = req.params;
-  try {
-    const result = await pool.query('DELETE FROM leave_balances WHERE id = $1 RETURNING *', [id]);
-    if (result.rows.length === 0) {
-      return res.status(404).json({ message: 'Leave balance record not found.' });
-    }
-    res.status(200).json({ message: 'Leave balance record deleted successfully.' });
-  } catch (error) {
-    console.error('Error deleting leave balance record:', error);
-    res.status(500).json({ message: 'Server error deleting leave balance record.' });
-  }
-});
+// Admin: Delete a specific leave balance record
+// This endpoint now expects user_id and leave_type in the request body for deletion.
+app.delete('/api/admin/leave-balances', authenticate, authorizeAdmin, async (req, res) => {
+    // Expect user_id and leave_type from the request body
+    const { userId, leaveType } = req.body; 
 
-app.post('/api/admin/notifications/global', authenticate, authorizeAdmin, async (req, res) => {
-  const { message } = req.body;
-  if (!message) {
-    return res.status(400).json({ message: 'Message is required for a global notification.' });
-  }
-  try {
-    const result = await pool.query(
-      'INSERT INTO notifications (user_id, message) VALUES (NULL, $1) RETURNING *', // NULL user_id for global
-      [message]
-    );
-    res.status(201).json(result.rows[0]);
-  } catch (error) {
-    console.error('Error sending global notification:', error.message, error.stack);
-    res.status(500).json({ message: 'Server error sending global notification.' });
-  }
+    if (!userId || !leaveType) {
+        return res.status(400).json({ message: 'User ID and Leave Type are required to delete a leave balance record.' });
+    }
+
+    const client = await pool.connect();
+    try {
+        const { rowCount } = await client.query(
+            'DELETE FROM leave_balances WHERE user_id = $1 AND leave_type = $2',
+            [userId, leaveType]
+        );
+        if (rowCount === 0) {
+            return res.status(404).json({ message: 'Leave balance record not found for the specified user and leave type.' });
+        }
+        res.status(200).json({ message: 'Leave balance record deleted successfully.' });
+    } catch (error) {
+        console.error('Error deleting leave balance record:', error.message, error.stack);
+        res.status(500).json({ message: 'Server error deleting leave balance record.' });
+    } finally {
+        client.release();
+    }
 });
 
 app.post('/api/admin/notifications/send', authenticate, authorizeAdmin, async (req, res) => {
@@ -2060,7 +2048,7 @@ app.get('/api/admin/corrections', authenticate, authorizeAdmin, async (req, res)
       SELECT ac.*, u.name as user_name, u.employee_id
       FROM corrections ac
       JOIN users u ON ac.user_id = u.id
-    `
+    `;
     const params = [];
     const conditions = [];
     if (status) {
@@ -2274,7 +2262,7 @@ app.get('/api/admin/attendance', authenticate, authorizeAdmin, async (req, res) 
 
     // Fetch attendance for the target date
     const attendanceResult = await client.query(
-      'SELECT user_id, check_in, check_out, status, check_in_device, check_out_device, duration_minutes FROM attendance WHERE date = $1',
+      'SELECT user_id, check_in, check_out, status, check_in_device, check_out_device, working_hours, late_time, extra_hours FROM attendance WHERE date = $1',
       [targetDate]
     );
     const dailyAttendanceMap = new Map(attendanceResult.rows.map(att => [att.user_id, att]));
@@ -2287,30 +2275,49 @@ app.get('/api/admin/attendance', authenticate, authorizeAdmin, async (req, res) 
     const dailyLeavesMap = new Map(leavesResult.rows.map(leave => [leave.user_id, leave]));
 
     // Fetch holidays for the target date
-    const holidayResult = await client.query('SELECT 1 FROM holidays WHERE date = $1', [targetDate]);
+    // Corrected column name to holiday_date
+    const holidayResult = await client.query('SELECT 1 FROM holidays WHERE holiday_date = $1', [targetDate]);
     const isHoliday = holidayResult.rows.length > 0;
 
-    // Fetch weekly offs for all employees for the target day of week
-    const dayOfWeek = moment(targetDate).format('dddd');
+    // Fetch weekly offs for all employees for the target day of week, considering effective dates
+    const dayOfWeekNum = moment(targetDate).day(); // 0 for Sunday, 6 for Saturday
     const weeklyOffsResult = await client.query(
-      `SELECT user_id FROM weekly_offs WHERE day_of_week = $1`,
-      [dayOfWeek]
+      `SELECT user_id, weekly_off_days, effective_date FROM weekly_offs WHERE effective_date <= $1`,
+      [targetDate]
     );
-    const weeklyOffUsers = new Set(weeklyOffsResult.rows.map(row => row.user_id));
+    const weeklyOffUsersMap = new Map(); // Map user_id to their relevant weekly_off_days array
+    weeklyOffsResult.rows.forEach(row => {
+        const userId = row.user_id;
+        const effectiveDate = moment(row.effective_date);
+        // Only keep the most recent effective config for each user
+        if (!weeklyOffUsersMap.has(userId) || effectiveDate.isAfter(weeklyOffUsersMap.get(userId).effectiveDate)) {
+            weeklyOffUsersMap.set(userId, {
+                effectiveDate: effectiveDate,
+                weeklyOffDays: row.weekly_off_days
+            });
+        }
+    });
+
 
     const detailedAttendance = allEmployees.map(user => {
       const attendanceRecord = dailyAttendanceMap.get(user.id);
       const leaveRecord = dailyLeavesMap.get(user.id);
-      const isUserWeeklyOff = weeklyOffUsers.has(user.id);
 
       let status = 'ABSENT';
       let check_in = null;
       let check_out = null;
-      let check_in_device = null;
-      let check_out_device = null;
       let late_time = '0 min';
       let working_hours = '0 hrs';
       let extra_hours = '0 hrs';
+      let check_in_device = null;
+      let check_out_device = null;
+
+      // Determine if the current day is a weekly off for this user
+      let isUserWeeklyOff = false;
+      const userWeeklyOffConfig = weeklyOffUsersMap.get(user.id);
+      if (userWeeklyOffConfig && Array.isArray(userWeeklyOffConfig.weeklyOffDays)) {
+          isUserWeeklyOff = userWeeklyOffConfig.weeklyOffDays.includes(dayOfWeekNum);
+      }
 
       // Determine status based on hierarchy: Holiday/Weekly Off > Leave > Attendance
       if (isHoliday) {
@@ -2327,7 +2334,7 @@ app.get('/api/admin/attendance', authenticate, authorizeAdmin, async (req, res) 
         }
       }
 
-      // If there's an attendance record, it overrides the default 'ABSENT'
+      // If there's an attendance record, it provides actual check-in/out times and potentially overrides status
       if (attendanceRecord) {
         const checkInMoment = attendanceRecord.check_in ? moment(attendanceRecord.check_in, 'HH:mm:ss') : null;
         const checkOutMoment = attendanceRecord.check_out ? moment(attendanceRecord.check_out, 'HH:mm:ss') : null;
@@ -2337,27 +2344,9 @@ app.get('/api/admin/attendance', authenticate, authorizeAdmin, async (req, res) 
         check_in_device = attendanceRecord.check_in_device || 'N/A';
         check_out_device = attendanceRecord.check_out_device || 'N/A';
 
-        // Calculate late time for present/late records
-        if (attendanceRecord.status === 'present' || attendanceRecord.status === 'late') {
-          const shiftStart = user.shift_type === 'evening' ? moment('18:00:00', 'HH:mm:ss') : moment('09:00:00', 'HH:mm:ss');
-          if (checkInMoment && checkInMoment.isAfter(shiftStart)) {
-            const minutesLate = Math.floor(moment.duration(checkInMoment.diff(shiftStart)).asMinutes());
-            late_time = `${minutesLate} min`;
-          }
-        }
-
-        // Calculate working hours
-        if (checkInMoment && checkOutMoment) {
-          let durationMinutes;
-          if (user.shift_type === 'evening' && checkOutMoment.isBefore(checkInMoment)) {
-            durationMinutes = moment.duration(checkOutMoment.clone().add(1, 'day').diff(checkInMoment)).asHours();
-          } else {
-            durationMinutes = moment.duration(checkOutMoment.diff(checkInMoment)).asHours();
-          }
-          working_hours = `${parseFloat(durationMinutes.toFixed(2))} hrs`;
-          const expectedWorkHours = 8;
-          extra_hours = durationMinutes > expectedWorkHours ? `${parseFloat((durationMinutes - expectedWorkHours).toFixed(2))} hrs` : '0 hrs';
-        }
+        late_time = `${attendanceRecord.late_time || 0} min`;
+        working_hours = `${attendanceRecord.working_hours || 0} hrs`;
+        extra_hours = `${attendanceRecord.extra_hours || 0} hrs`;
 
         // Use attendance status if it's not a holiday, weekly off, or leave
         if (!isHoliday && !isUserWeeklyOff && !leaveRecord) {
@@ -2407,19 +2396,9 @@ app.get('/api/admin/monthly-summary', authenticate, authorizeAdmin, async (req, 
             return res.status(400).json({ message: 'Invalid month or year provided.' });
         }
 
-        const startDate = moment([targetYear, targetMonth - 1, 1]).tz('Asia/Kolkata').startOf('month');
-        const endDate = startDate.clone().endOf('month');
-
         // Fetch all users
         const usersResult = await client.query('SELECT id, name, employee_id, shift_type FROM users ORDER BY name ASC');
         const users = usersResult.rows;
-
-        // Fetch all holidays for the month
-        const holidaysResult = await client.query(
-            `SELECT date FROM holidays WHERE date BETWEEN $1 AND $2`,
-            [startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]
-        );
-        const holidayDates = new Set(holidaysResult.rows.map(row => moment(row.date).format('YYYY-MM-DD')));
 
         const monthlySummary = [];
 
@@ -2427,136 +2406,26 @@ app.get('/api/admin/monthly-summary', authenticate, authorizeAdmin, async (req, 
             const userId = user.id;
             const employeeId = user.employee_id;
             const userName = user.name;
-            const shiftType = user.shift_type || 'day'; // Default to 'day' if not set
 
-            let presentDays = 0;
-            let lateDays = 0;
-            let absentDays = 0;
-            let leaveDays = 0; // Includes both paid and unpaid leaves
-            let lopDays = 0; // Loss of Pay
-            let holidaysCount = 0;
-            let weeklyOffsCount = 0;
-
-            // Fetch user's weekly offs (MODIFIED: now includes start_date and end_date)
-            const userWeeklyOffsResult = await client.query(
-                `SELECT day_of_week, start_date, end_date FROM weekly_offs WHERE user_id = $1`,
-                [userId]
-            );
-            const userWeeklyOffRecords = userWeeklyOffsResult.rows; // Store as array of objects
-            console.log(`DEBUG: User ${userName} (${userId}) has ${userWeeklyOffRecords.length} weekly off records:`, userWeeklyOffRecords);
-
-
-            // Fetch attendance records for the user for the month
-            const attendanceResult = await client.query(
-                `SELECT date, status, late_time FROM attendance WHERE user_id = $1 AND date BETWEEN $2 AND $3`,
-                [userId, startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]
-            );
-            const attendanceMap = new Map(attendanceResult.rows.map(att => [moment(att.date).format('YYYY-MM-DD'), att]));
-
-            // Fetch leave applications for the user for the month
-            const leaveApplicationsResult = await client.query(
-                `SELECT from_date, to_date, status, is_half_day, leave_type_id
-                 FROM leave_applications
-                 WHERE user_id = $1 AND (
-                    from_date BETWEEN $2 AND $3 OR
-                    to_date BETWEEN $2 AND $3 OR
-                    $2 BETWEEN from_date AND to_date
-                 ) AND status IN ('approved', 'overridden_by_correction', 'cancellation_pending')`,
-                [userId, startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]
-            );
-
-            // Fetch leave types to determine if a leave is paid or unpaid
-            const leaveTypesResult = await client.query('SELECT id, name, is_paid FROM leave_types');
-            const leaveTypesMap = new Map(leaveTypesResult.rows.map(type => [type.id, type]));
-
-
-            for (let d = startDate.clone(); d.isSameOrBefore(endDate); d.add(1, 'day')) {
-                const targetDate = d.format('YYYY-MM-DD');
-                const dayOfWeek = d.format('dddd'); // e.g., 'Sunday'
-
-                const isWeekend = (d.day() === 0 || d.day() === 6); // 0 for Sunday, 6 for Saturday
-                const isHoliday = holidayDates.has(targetDate);
-
-                // MODIFIED: Check if the current day is a weekly off for the user within its valid date range
-                let isWeeklyOff = false;
-                for (const off of userWeeklyOffRecords) {
-                    const isDayMatch = off.day_of_week === dayOfWeek;
-                    const isDateInRange = moment(targetDate).isBetween(off.start_date, off.end_date, 'day', '[]');
-                    console.log(`DEBUG: Evaluating weekly off for date: ${targetDate} (${dayOfWeek})`);
-                    console.log(`DEBUG:   Checking record: Day: ${off.day_of_week}, Start: ${off.start_date}, End: ${off.end_date}`);
-                    console.log(`DEBUG:   Day match: ${isDayMatch}, Date in range: ${isDateInRange}`);
-                    if (isDayMatch && isDateInRange) {
-                        isWeeklyOff = true;
-                        console.log(`DEBUG:   MATCH FOUND! ${targetDate} is a weekly off.`);
-                        break; // Found a match, no need to check other records for this day
-                    }
-                }
-
-
-                let dayStatus = 'UNKNOWN'; // Default status for the day
-
-                const attendance = attendanceMap.get(targetDate);
-                const leave = leaveApplicationsResult.rows.find(l =>
-                    moment(targetDate).isBetween(l.from_date, l.to_date, 'day', '[]') && l.status === 'approved'
-                );
-
-                if (isHoliday) {
-                    holidaysCount++;
-                    dayStatus = 'HOLIDAY';
-                } else if (isWeeklyOff) {
-                    weeklyOffsCount++;
-                    dayStatus = 'WEEKLY OFF';
-                } else if (leave) {
-                    // Check if it's a half-day leave
-                    const leaveType = leaveTypesMap.get(leave.leave_type_id);
-                    if (leave.is_half_day) {
-                        leaveDays += 0.5;
-                        if (!leaveType || !leaveType.is_paid) { // If leave type is not found or not paid
-                            lopDays += 0.5;
-                        }
-                        dayStatus = 'HALF DAY LEAVE';
-                    } else {
-                        leaveDays++;
-                        if (!leaveType || !leaveType.is_paid) { // If leave type is not found or not paid
-                            lopDays++;
-                        }
-                        dayStatus = 'ON LEAVE';
-                    }
-                } else if (attendance) {
-                    if (attendance.status === 'PRESENT') {
-                        presentDays++;
-                        dayStatus = 'PRESENT';
-                    } else if (attendance.status === 'LATE') {
-                        lateDays++;
-                        presentDays++; // Late is still a form of present
-                        dayStatus = 'LATE';
-                    } else if (attendance.status === 'ABSENT') {
-                        absentDays++;
-                        dayStatus = 'ABSENT';
-                    } else if (attendance.status === 'ON_LEAVE' || attendance.status === 'HALF_DAY_LEAVE') {
-                        // This case should ideally be handled by the 'leave' check above
-                        // but including it for robustness if attendance status is directly set.
-                        leaveDays += (attendance.status === 'HALF_DAY_LEAVE' ? 0.5 : 1);
-                        dayStatus = attendance.status;
-                    }
-                } else {
-                    // If not a weekend, holiday, leave, or attendance record, it's considered absent
-                    absentDays++;
-                    dayStatus = 'ABSENT';
-                }
-            }
+            // Use the shared calculateAttendanceSummary helper
+            const summary = await calculateAttendanceSummary(userId, targetYear, targetMonth, client);
 
             monthlySummary.push({
                 user_id: userId,
                 user_name: userName,
                 employee_id: employeeId,
-                present_days: presentDays,
-                late_days: lateDays,
-                absent_days: absentDays,
-                leave_days: leaveDays,
-                lop_days: lopDays,
-                holidays: holidaysCount,
-                weekly_offs: weeklyOffsCount
+                present_days: summary.presentDays,
+                late_days: summary.lateDays,
+                absent_days: summary.absentDays,
+                leave_days: summary.leaveDays, // Paid leaves
+                lop_days: summary.lopDays,     // Unpaid leaves
+                holidays: summary.holidaysCount,
+                weekly_offs: summary.actualWeeklyOffDays,
+                total_working_hours: summary.totalWorkingHours,
+                average_daily_hours: summary.averageDailyHours,
+                total_expected_working_days: summary.totalWorkingDaysInMonth,
+                paid_days_for_payroll: summary.paidDays, // This is the crucial one for payroll
+                unpaid_leaves_for_payroll: summary.unpaidLeaves // This is the crucial one for payroll
             });
         }
 
@@ -2573,7 +2442,7 @@ app.get('/api/admin/monthly-summary', authenticate, authorizeAdmin, async (req, 
 
 app.get('/api/admin/export-attendance', authenticate, authorizeAdmin, async (req, res) => {
   try {
-    const { year, month, employee_id } = req.query; // Removed employee_name as it's not used for filtering
+    const { year, month, employee_id } = req.query;
     if (!year || !month) {
       return res.status(400).json({ message: 'Year and month are required for export.' });
     }
@@ -2607,146 +2476,38 @@ app.get('/api/admin/export-attendance', authenticate, authorizeAdmin, async (req
     const usersResult = await pool.query(usersQuery, usersQueryParams);
     const usersToExport = usersResult.rows;
 
-    // Fetch all attendance records for the period
-    let attendanceQuery = `
-      SELECT user_id, date, check_in, check_out, status, check_in_device, check_out_device, duration_minutes
-      FROM attendance
-      WHERE date BETWEEN $1 AND $2
-    `;
-    const attendanceQueryParams = [startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')];
-    if (userId) {
-      attendanceQuery += ` AND user_id = $3`;
-      attendanceQueryParams.push(userId);
-    }
-    const attendanceRecordsResult = await pool.query(attendanceQuery, attendanceQueryParams);
-    const attendanceRecordsMap = new Map();
-    attendanceRecordsResult.rows.forEach(row => {
-      const key = `${row.user_id}-${row.date}`;
-      attendanceRecordsMap.set(key, row);
-    });
-
-    // Fetch all leave applications for the period
-    let leavesQuery = `
-      SELECT user_id, from_date, to_date, status, is_half_day, leave_type_id
-      FROM leave_applications
-      WHERE (from_date <= $2 AND to_date >= $1)
-    `;
-    const leavesQueryParams = [startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')];
-    if (userId) {
-      leavesQuery += ` AND user_id = $3`;
-      leavesQueryParams.push(userId);
-    }
-    const leavesResult = await pool.query(leavesQuery, leavesQueryParams);
-    const leavesMap = new Map(); // Map user_id to an array of their leaves
-    leavesResult.rows.forEach(leave => {
-      if (!leavesMap.has(leave.user_id)) {
-        leavesMap.set(leave.user_id, []);
-      }
-      leavesMap.get(leave.user_id).push(leave);
-    });
-
-    // Fetch all holidays for the period
-    const holidayResult = await pool.query('SELECT date FROM holidays WHERE date BETWEEN $1 AND $2', [startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]);
-    const holidays = new Set(holidayResult.rows.map(row => moment(row.date).format('YYYY-MM-DD')));
-
-    // Fetch all weekly offs
-    let weeklyOffsQuery = 'SELECT user_id, day_of_week FROM weekly_offs';
-    const weeklyOffsQueryParams = [];
-    if (userId) {
-      weeklyOffsQuery += ' WHERE user_id = $1';
-      weeklyOffsQueryParams.push(userId);
-    }
-    const weeklyOffsResult = await pool.query(weeklyOffsQuery, weeklyOffsQueryParams);
-    const weeklyOffsMap = new Map(); // Map user_id to a Set of their weekly off days
-    weeklyOffsResult.rows.forEach(row => {
-      if (!weeklyOffsMap.has(row.user_id)) {
-        weeklyOffsMap.set(row.user_id, new Set());
-      }
-      weeklyOffsMap.get(row.user_id).add(row.day_of_week);
-    });
-
     let csvContent = `Employee Name,Employee ID,Date,Day,Check-In,Check-Out,Late Time,Working Hours,Extra Hours,Status,Check-In Device,Check-Out Device\n`;
 
     for (const user of usersToExport) {
-      let currentDay = startDate.clone();
-      while (currentDay.isSameOrBefore(endDate)) {
-        const dateStr = currentDay.format('YYYY-MM-DD');
-        const dayOfWeek = currentDay.format('dddd');
-        const attendanceKey = `${user.id}-${dateStr}`;
-        const record = attendanceRecordsMap.get(attendanceKey) || {};
+        // Use the calculateAttendanceSummary to get daily statuses for the month
+        const summary = await calculateAttendanceSummary(user.id, parseInt(year), parseInt(month), pool);
+        const dailyStatusMap = summary.dailyStatusMap;
 
-        let status = 'ABSENT';
-        let check_in = '';
-        let check_out = '';
-        let late_time = '0 min';
-        let working_hours = '0 hrs';
-        let extra_hours = '0 hrs';
-        let check_in_device = 'N/A';
-        let check_out_device = 'N/A';
+        let currentDay = startDate.clone();
+        while (currentDay.isSameOrBefore(endDate)) {
+            const dateStr = currentDay.format('YYYY-MM-DD');
+            const dayOfWeek = currentDay.format('dddd');
+            const status = dailyStatusMap[dateStr] || 'N/A'; // Get status from the map
 
-        // Determine status hierarchy: Holiday/Weekly Off > Leave > Attendance Record > Default Absent
-        if (holidays.has(dateStr)) {
-          status = 'HOLIDAY';
-        } else if (weeklyOffsMap.has(user.id) && weeklyOffsMap.get(user.id).has(dayOfWeek)) {
-          status = 'WEEKLY OFF';
-        } else {
-          const userLeaves = leavesMap.get(user.id) || [];
-          const leaveForDay = userLeaves.find(l =>
-            moment(dateStr).isBetween(l.from_date, l.to_date, 'day', '[]') &&
-            (l.status === 'approved' || l.status === 'overridden_by_correction' || l.status === 'cancellation_pending')
-          );
+            // Fetch actual attendance record for this specific day to get times and devices
+            const attendanceRecordResult = await pool.query(
+                `SELECT check_in, check_out, late_time, working_hours, extra_hours, check_in_device, check_out_device
+                 FROM attendance WHERE user_id = $1 AND date = $2`,
+                [user.id, dateStr]
+            );
+            const record = attendanceRecordResult.rows[0] || {};
 
-          if (leaveForDay) {
-            if (leaveForDay.status === 'approved') {
-              status = leaveForDay.is_half_day ? 'HALF DAY LEAVE' : 'ON LEAVE';
-            } else if (leaveForDay.status === 'cancellation_pending') {
-              status = 'LEAVE CANCELLATION PENDING';
-            } else if (leaveForDay.status === 'overridden_by_correction') {
-              status = 'PRESENT BY CORRECTION';
-            }
-          }
+            const check_in = record.check_in ? moment(record.check_in, 'HH:mm:ss').format('hh:mm A') : '';
+            const check_out = record.check_out ? moment(record.check_out, 'HH:mm:ss').format('hh:mm A') : '';
+            const late_time = record.late_time ? `${record.late_time} min` : '0 min';
+            const working_hours = record.working_hours ? `${record.working_hours} hrs` : '0 hrs';
+            const extra_hours = record.extra_hours ? `${record.extra_hours} hrs` : '0 hrs';
+            const check_in_device = record.check_in_device || 'N/A';
+            const check_out_device = record.check_out_device || 'N/A';
 
-          if (record.status) {
-            // If there's an attendance record, use its status unless it's overridden by a leave/correction
-            if (!leaveForDay || leaveForDay.status === 'overridden_by_correction') {
-              status = String(record.status).replace(/_/g, ' ').toUpperCase();
-            }
-
-            check_in = record.check_in ? moment(record.check_in, 'HH:mm:ss', 'HH:mm').format('hh:mm A') : '';
-            check_out = record.check_out ? moment(record.check_out, 'HH:mm:ss', 'HH:mm').format('hh:mm A') : '';
-            check_in_device = record.check_in_device || 'N/A';
-            check_out_device = record.check_out_device || 'N/A';
-
-            // Calculate late time for records that are present/late
-            if (record.check_in) {
-              const checkInMoment = moment(record.check_in, 'HH:mm:ss');
-              const shiftStart = user.shift_type === 'evening' ? moment('18:00:00', 'HH:mm:ss') : moment('09:00:00', 'HH:mm:ss');
-              if (checkInMoment.isAfter(shiftStart)) {
-                const minutesLate = Math.floor(moment.duration(checkInMoment.diff(shiftStart)).asMinutes());
-                late_time = `${minutesLate} min`;
-              }
-            }
-
-            // Calculate working hours and extra hours
-            if (record.check_in && record.check_out) {
-              const checkInMoment = moment(record.check_in, 'HH:mm:ss');
-              const checkOutMoment = moment(record.check_out, 'HH:mm:ss');
-              let durationMinutes;
-              if (user.shift_type === 'evening' && checkOutMoment.isBefore(checkInMoment)) {
-                durationMinutes = moment.duration(checkOutMoment.clone().add(1, 'day').diff(checkInMoment)).asHours();
-              } else {
-                durationMinutes = moment.duration(checkOutMoment.diff(checkInMoment)).asHours();
-              }
-              working_hours = `${parseFloat(durationMinutes.toFixed(2))} hrs`;
-              const expectedWorkHours = 8;
-              extra_hours = durationMinutes > expectedWorkHours ? `${parseFloat((durationMinutes - expectedWorkHours).toFixed(2))} hrs` : '0 hrs';
-            }
-          }
+            csvContent += `"${user.name}","${user.employee_id}","${dateStr}","${dayOfWeek}","${check_in}","${check_out}","${late_time}","${working_hours}","${extra_hours}","${status}","${check_in_device}","${check_out_device}"\n`;
+            currentDay.add(1, 'day');
         }
-
-        csvContent += `"${user.name}","${user.employee_id}","${dateStr}","${dayOfWeek}","${check_in}","${check_out}","${late_time}","${working_hours}","${extra_hours}","${status}","${check_in_device}","${check_out_device}"\n`;
-        currentDay.add(1, 'day');
-      }
     }
 
     res.setHeader('Content-Type', 'text/csv');
@@ -2760,47 +2521,52 @@ app.get('/api/admin/export-attendance', authenticate, authorizeAdmin, async (req
 
 app.post('/admin/attendance/mark-absent-forgotten-checkout', authenticate, authorizeAdmin, async (req, res) => {
   try {
-    const { date, userId } = req.body;
+    const { date, userId, adminReason } = req.body;
     const targetDate = date || moment().tz('Asia/Kolkata').format('YYYY-MM-DD');
 
     console.log('--- DEBUGGING mark-absent-forgotten-checkout ---');
     console.log('Received date (req.body.date):', date);
     console.log('Received userId (req.body.userId):', userId);
+    console.log('Received adminReason (req.body.adminReason):', adminReason);
     console.log('Constructed targetDate:', targetDate, ' (Type:', typeof targetDate, ')');
     console.log('UserId being pushed to params:', userId, ' (Type:', typeof userId, ')');
 
     let queryText = `
       UPDATE attendance
-      SET status = 'absent', check_out = NULL, duration_minutes = 0, updated_at = CURRENT_TIMESTAMP
+      SET status = 'absent',
+          check_out = NULL,
+          working_hours = 0, -- Reset working hours
+          extra_hours = 0,   -- Reset extra hours
+          admin_comment = $2,
+          updated_at = CURRENT_TIMESTAMP
       WHERE date = $1
         AND check_in IS NOT NULL
         AND check_out IS NULL
         AND status NOT IN ('on_leave', 'lop', 'half-day')
-    `; // Removed RETURNING here initially
+    `;
 
-    const queryParams = [targetDate];
+    const queryParams = [targetDate, adminReason];
 
     if (userId) {
-      // Append the user_id condition directly to the WHERE clause
-      queryText += ` AND user_id = $2`;
+      queryText += ` AND user_id = $3`;
       queryParams.push(userId);
     }
 
-    // Add the RETURNING clause AFTER all WHERE conditions are built
-    queryText += ` RETURNING user_id, date, status`; // Add RETURNING here
+    queryText += ` RETURNING user_id, date, status`;
 
     console.log('Final queryText sent to DB:', queryText);
     console.log('Final queryParams sent to DB:', queryParams);
 
-    const result = await pool.query(queryText, queryParams); // This is your line 2779
+    const result = await pool.query(queryText, queryParams);
 
     console.log('Notification successful, rows updated:', result.rows.length);
     console.log('--- END DEBUGGING ---');
 
     for (const row of result.rows) {
+      const notificationMessage = `Your attendance for ${row.date} was marked as absent due to forgotten checkout by admin. Reason: ${adminReason || 'Not specified'}.`;
       await pool.query(
         'INSERT INTO notifications (user_id, message) VALUES ($1, $2)',
-        [row.user_id, `Your attendance for ${row.date} was marked as absent due to forgotten checkout by admin.`]
+        [row.user_id, notificationMessage]
       );
     }
     res.json({ message: `Marked ${result.rows.length} records as absent for ${targetDate}${userId ? ` for user ${userId}` : ''}.` });
@@ -2900,17 +2666,24 @@ app.get('/api/admin/stats', authenticate, authorizeAdmin, async (req, res) => {
     leaveUsers.rows.forEach(row => coveredUsers.add(row.user_id));
 
     // Add users on holiday (if today is a holiday)
-    const isTodayHolidayResult = await pool.query('SELECT 1 FROM holidays WHERE date = $1', [today]);
+    // Corrected column name to holiday_date
+    const isTodayHolidayResult = await pool.query('SELECT 1 FROM holidays WHERE holiday_date = $1', [today]);
     if (isTodayHolidayResult.rows.length > 0) {
         const allEmployeeIdsResult = await pool.query('SELECT id FROM users WHERE role = $1', ['employee']);
         allEmployeeIdsResult.rows.forEach(row => coveredUsers.add(row.id));
     }
 
     // Add users on weekly off
-    const dayOfWeekToday = moment().tz('Asia/Kolkata').format('dddd');
-    const weeklyOffUsersToday = await pool.query(`SELECT user_id FROM weekly_offs WHERE day_of_week = $1`, [dayOfWeekToday]);
-    weeklyOffUsersToday.rows.forEach(row => coveredUsers.add(row.user_id));
-
+    const dayOfWeekTodayNum = moment().tz('Asia/Kolkata').day(); // 0 for Sunday, 6 for Saturday
+    const weeklyOffUsersToday = await pool.query(`SELECT user_id, weekly_off_days, effective_date FROM weekly_offs WHERE effective_date <= $1`, [today]);
+    weeklyOffUsersToday.rows.forEach(row => {
+        const effectiveDate = moment(row.effective_date);
+        // Check if this config is the most recent for the user and if today's day of week is in their weekly_off_days
+        if (row.weekly_off_days.includes(dayOfWeekTodayNum) &&
+            (!coveredUsers.has(row.user_id) || effectiveDate.isAfter(moment(coveredUsers.get(row.user_id).effectiveDate)))) { // Simplified check
+            coveredUsers.add(row.user_id);
+        }
+    });
 
     // Calculate absent users: total employees - covered users
     const absentToday = totalActiveEmployees - coveredUsers.size;
@@ -2933,208 +2706,29 @@ app.get('/api/admin/stats', authenticate, authorizeAdmin, async (req, res) => {
 });
 
 
-// Admin: Get monthly attendance summary for all employees
-app.get('/api/admin/monthly-summary', authenticate, authorizeAdmin, async (req, res) => {
-    const { month, year } = req.query;
-
-    if (!month || !year) {
-        return res.status(400).json({ message: 'Month and year are required for monthly summary.' });
-    }
-
-    const client = await pool.connect();
-    try {
-        const targetMonth = parseInt(month, 10);
-        const targetYear = parseInt(year, 10);
-
-        if (isNaN(targetMonth) || targetMonth < 1 || targetMonth > 12 || isNaN(targetYear)) {
-            return res.status(400).json({ message: 'Invalid month or year provided.' });
-        }
-
-        const startDate = moment([targetYear, targetMonth - 1, 1]).tz('Asia/Kolkata').startOf('month');
-        const endDate = startDate.clone().endOf('month');
-
-        // Fetch all users
-        const usersResult = await client.query('SELECT id, name, employee_id, shift_type FROM users ORDER BY name ASC');
-        const users = usersResult.rows;
-
-        // Fetch all holidays for the month
-        const holidaysResult = await client.query(
-            `SELECT date FROM holidays WHERE date BETWEEN $1 AND $2`,
-            [startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]
-        );
-        const holidayDates = new Set(holidaysResult.rows.map(row => moment(row.date).format('YYYY-MM-DD')));
-
-        const monthlySummary = [];
-
-        for (const user of users) {
-            const userId = user.id;
-            const employeeId = user.employee_id;
-            const userName = user.name;
-            const shiftType = user.shift_type || 'day'; // Default to 'day' if not set
-
-            let presentDays = 0;
-            let lateDays = 0;
-            let absentDays = 0;
-            let leaveDays = 0; // Includes both paid and unpaid leaves
-            let lopDays = 0; // Loss of Pay
-            let holidaysCount = 0;
-            let weeklyOffsCount = 0;
-
-            // Fetch user's weekly offs (MODIFIED: now includes start_date and end_date)
-            const userWeeklyOffsResult = await client.query(
-                `SELECT day_of_week, start_date, end_date FROM weekly_offs WHERE user_id = $1`,
-                [userId]
-            );
-            const userWeeklyOffRecords = userWeeklyOffsResult.rows; // Store as array of objects
-            console.log(`DEBUG: User ${userName} (${userId}) has ${userWeeklyOffRecords.length} weekly off records:`, userWeeklyOffRecords);
-
-
-            // Fetch attendance records for the user for the month
-            const attendanceResult = await client.query(
-                `SELECT date, status, late_time FROM attendance WHERE user_id = $1 AND date BETWEEN $2 AND $3`,
-                [userId, startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]
-            );
-            const attendanceMap = new Map(attendanceResult.rows.map(att => [moment(att.date).format('YYYY-MM-DD'), att]));
-
-            // Fetch leave applications for the user for the month
-            const leaveApplicationsResult = await client.query(
-                `SELECT from_date, to_date, status, is_half_day, leave_type_id
-                 FROM leave_applications
-                 WHERE user_id = $1 AND (
-                    from_date BETWEEN $2 AND $3 OR
-                    to_date BETWEEN $2 AND $3 OR
-                    $2 BETWEEN from_date AND to_date
-                 ) AND status IN ('approved', 'overridden_by_correction', 'cancellation_pending')`,
-                [userId, startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]
-            );
-
-            // Fetch leave types to determine if a leave is paid or unpaid
-            const leaveTypesResult = await client.query('SELECT id, name, is_paid FROM leave_types');
-            const leaveTypesMap = new Map(leaveTypesResult.rows.map(type => [type.id, type]));
-
-
-            for (let d = startDate.clone(); d.isSameOrBefore(endDate); d.add(1, 'day')) {
-                const targetDate = d.format('YYYY-MM-DD');
-                const dayOfWeek = d.format('dddd'); // e.g., 'Sunday'
-
-                const isWeekend = (d.day() === 0 || d.day() === 6); // 0 for Sunday, 6 for Saturday
-                const isHoliday = holidayDates.has(targetDate);
-
-                // MODIFIED: Check if the current day is a weekly off for the user within its valid date range
-                let isWeeklyOff = false;
-                for (const off of userWeeklyOffRecords) {
-                    const isDayMatch = off.day_of_week === dayOfWeek;
-                    const isDateInRange = moment(targetDate).isBetween(off.start_date, off.end_date, 'day', '[]');
-                    console.log(`DEBUG: Evaluating weekly off for date: ${targetDate} (${dayOfWeek})`);
-                    console.log(`DEBUG:   Checking record: Day: ${off.day_of_week}, Start: ${off.start_date}, End: ${off.end_date}`);
-                    console.log(`DEBUG:   Day match: ${isDayMatch}, Date in range: ${isDateInRange}`);
-                    if (isDayMatch && isDateInRange) {
-                        isWeeklyOff = true;
-                        console.log(`DEBUG:   MATCH FOUND! ${targetDate} is a weekly off.`);
-                        break; // Found a match, no need to check other records for this day
-                    }
-                }
-
-
-                let dayStatus = 'UNKNOWN'; // Default status for the day
-
-                const attendance = attendanceMap.get(targetDate);
-                const leave = leaveApplicationsResult.rows.find(l =>
-                    moment(targetDate).isBetween(l.from_date, l.to_date, 'day', '[]') && l.status === 'approved'
-                );
-
-                if (isHoliday) {
-                    holidaysCount++;
-                    dayStatus = 'HOLIDAY';
-                } else if (isWeeklyOff) {
-                    weeklyOffsCount++;
-                    dayStatus = 'WEEKLY OFF';
-                } else if (leave) {
-                    // Check if it's a half-day leave
-                    const leaveType = leaveTypesMap.get(leave.leave_type_id);
-                    if (leave.is_half_day) {
-                        leaveDays += 0.5;
-                        if (!leaveType || !leaveType.is_paid) { // If leave type is not found or not paid
-                            lopDays += 0.5;
-                        }
-                        dayStatus = 'HALF DAY LEAVE';
-                    } else {
-                        leaveDays++;
-                        if (!leaveType || !leaveType.is_paid) { // If leave type is not found or not paid
-                            lopDays++;
-                        }
-                        dayStatus = 'ON LEAVE';
-                    }
-                } else if (attendance) {
-                    if (attendance.status === 'PRESENT') {
-                        presentDays++;
-                        dayStatus = 'PRESENT';
-                    } else if (attendance.status === 'LATE') {
-                        lateDays++;
-                        presentDays++; // Late is still a form of present
-                        dayStatus = 'LATE';
-                    } else if (attendance.status === 'ABSENT') {
-                        absentDays++;
-                        dayStatus = 'ABSENT';
-                    } else if (attendance.status === 'ON_LEAVE' || attendance.status === 'HALF_DAY_LEAVE') {
-                        // This case should ideally be handled by the 'leave' check above
-                        // but including it for robustness if attendance status is directly set.
-                        leaveDays += (attendance.status === 'HALF_DAY_LEAVE' ? 0.5 : 1);
-                        dayStatus = attendance.status;
-                    }
-                } else {
-                    // If not a weekend, holiday, leave, or attendance record, it's considered absent
-                    absentDays++;
-                    dayStatus = 'ABSENT';
-                }
-            }
-
-            monthlySummary.push({
-                user_id: userId,
-                user_name: userName,
-                employee_id: employeeId,
-                present_days: presentDays,
-                late_days: lateDays,
-                absent_days: absentDays,
-                leave_days: leaveDays,
-                lop_days: lopDays,
-                holidays: holidaysCount,
-                weekly_offs: weeklyOffsCount
-            });
-        }
-
-        res.status(200).json(monthlySummary);
-
-    } catch (error) {
-        console.error('Error fetching monthly summary (admin):', error);
-        res.status(500).json({ message: 'Server error fetching monthly summary.' });
-    } finally {
-        client.release();
-    }
-});
 
 // Admin: Add a weekly off for an employee (MODIFIED)
 app.post('/api/admin/weekly-offs', authenticate, authorizeAdmin, async (req, res) => {
-    const { user_id, day_of_week, start_date, end_date } = req.body;
+    const { user_id, weekly_off_days, effective_date, end_date } = req.body; // ADD end_date here
 
-    if (!user_id || !day_of_week || !start_date || !end_date) {
-        return res.status(400).json({ message: 'User ID, day of week, start date, and end date are required.' });
+    if (!user_id || !Array.isArray(weekly_off_days) || weekly_off_days.length === 0 || !effective_date) {
+        return res.status(400).json({ message: 'User ID, an array of day numbers (0-6), and an effective date are required.' });
     }
 
-    if (!moment(start_date).isValid() || !moment(end_date).isValid() || moment(start_date).isAfter(moment(end_date))) {
-        return res.status(400).json({ message: 'Invalid date range provided.' });
+    if (!moment(effective_date).isValid()) {
+        return res.status(400).json({ message: 'Invalid effective date provided.' });
     }
 
     try {
         const result = await pool.query(
-            `INSERT INTO weekly_offs (user_id, day_of_week, start_date, end_date) VALUES ($1, $2, $3, $4) RETURNING *`,
-            [user_id, day_of_week, start_date, end_date]
-        );
+    `INSERT INTO weekly_offs (user_id, weekly_off_days, effective_date, end_date) VALUES ($1, $2, $3, $4) RETURNING *`, // ADD end_date column
+    [user_id, weekly_off_days, effective_date, end_date || null] // ADD end_date parameter (use null if not provided)
+);
         res.status(201).json({ message: 'Weekly off assigned successfully.', weeklyOff: result.rows[0] });
     } catch (error) {
         console.error('Error adding weekly off:', error);
         if (error.code === '23505') { // Unique violation
-            return res.status(409).json({ message: 'This weekly off assignment already exists for the specified period.' });
+            return res.status(409).json({ message: 'A weekly off assignment for this user on this effective date already exists.' });
         }
         res.status(500).json({ message: 'Server error assigning weekly off.' });
     }
@@ -3143,13 +2737,13 @@ app.post('/api/admin/weekly-offs', authenticate, authorizeAdmin, async (req, res
 // Admin: Get all assigned weekly offs (MODIFIED)
 app.get('/api/admin/weekly-offs', authenticate, authorizeAdmin, async (req, res) => {
     try {
-        // Include start_date and end_date in the select query
-        const result = await pool.query(`
-            SELECT wo.id, wo.user_id, u.name AS user_name, u.employee_id, wo.day_of_week, wo.start_date, wo.end_date
-            FROM weekly_offs wo
-            JOIN users u ON wo.user_id = u.id
-            ORDER BY u.name ASC, wo.start_date DESC
-        `);
+        // Include weekly_off_days (array) and effective_date in the select query
+   const result = await pool.query(`
+    SELECT wo.id, wo.user_id, u.name AS user_name, u.employee_id, wo.weekly_off_days, wo.effective_date, wo.end_date
+    FROM weekly_offs wo
+    JOIN users u ON wo.user_id = u.id
+    ORDER BY u.name ASC, wo.effective_date DESC
+`);
         res.status(200).json(result.rows);
     } catch (error) {
         console.error('Error fetching weekly offs:', error);
@@ -3202,37 +2796,6 @@ app.post('/api/profile-update-requests', authenticate, async (req, res) => {
         console.error('Backend: Error in /api/profile-update-requests POST route:', error.message, error.stack);
         if (!res.headersSent) {
             res.status(500).json({ message: `Server error submitting profile update request: ${error.message}` });
-        }
-    } finally {
-        if (client) {
-            client.release();
-        }
-    }
-});
-
-// NEW ADMIN ENDPOINT: Get all pending profile update requests for admin review
-app.get('/api/admin/profile-update-requests', authenticate, authorizeAdmin, async (req, res) => {
-    let client = null;
-    try {
-        client = await pool.connect();
-        const result = await client.query(`
-            SELECT
-    pur.*,
-    u.name AS user_full_name, -- Use the actual column name here (e.g., u.name)
-    u.email AS user_email,
-    u.employee_id AS user_employee_id
-FROM
-    profile_update_requests pur
-JOIN
-    users u ON pur.user_id = u.id
-ORDER BY
-    pur.requested_at DESC;
-        `); // Fetch all requests, you might want to filter by status 'pending' here
-        res.status(200).json(result.rows); // Send the data as JSON
-    } catch (error) {
-        console.error('Backend: Error in /api/admin/profile-update-requests GET route:', error.message, error.stack);
-        if (!res.headersSent) {
-            res.status(500).json({ message: `Server error fetching profile update requests: ${error.message}` });
         }
     } finally {
         if (client) {
@@ -3361,9 +2924,1083 @@ app.post('/api/admin/profile-update-requests/:requestId/reject', authenticate, a
     }
 });
 
+// NEW ADMIN ENDPOINT: Get all pending profile update requests
+app.get('/api/admin/profile-update-requests', authenticate, authorizeAdmin, async (req, res) => {
+    let client = null;
+    try {
+        client = await pool.connect();
+
+        const query = `
+            SELECT
+                pur.id,
+                pur.user_id,
+                u.name AS user_name,
+                u.email AS user_email,
+                pur.requested_data,
+                pur.status,
+                pur.requested_at
+            FROM
+                profile_update_requests pur
+            JOIN
+                users u ON pur.user_id = u.id
+            WHERE
+                pur.status = 'pending'
+            ORDER BY
+                pur.requested_at ASC;
+        `;
+        const result = await client.query(query);
+
+        console.log(`Backend: Fetched ${result.rows.length} pending profile update requests.`);
+        res.status(200).json(result.rows);
+
+    } catch (error) {
+        console.error('Backend: Error in /api/admin/profile-update-requests GET route:', error.message, error.stack);
+        if (!res.headersSent) {
+            res.status(500).json({ message: `Server error fetching profile update requests: ${error.message}` });
+        }
+    } finally {
+        if (client) {
+            client.release();
+        }
+    }
+});
+
+// --- PAYROLL MANAGEMENT ROUTES (ADMIN ONLY) ---
+
+// POST /api/admin/payroll/settings - Configure company-wide payroll settings
+// Body: { setting_name: 'EPF_EMPLOYEE_RATE', setting_value: '0.12', description: '...' }
+app.post('/api/admin/payroll/settings', authenticate, authorizeAdmin, async (req, res) => {
+    const { setting_name, setting_value, description } = req.body;
+    try {
+        const result = await pool.query(
+            `INSERT INTO payroll_settings (setting_name, setting_value, description)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (setting_name) DO UPDATE SET
+                setting_value = EXCLUDED.setting_value,
+                description = EXCLUDED.description,
+                updated_at = CURRENT_TIMESTAMP
+             RETURNING *`,
+            [setting_name, setting_value, description]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (error) {
+        console.error('Error saving payroll setting:', error.message, error.stack);
+        res.status(500).json({ message: 'Server error saving payroll setting.' });
+    }
+});
+
+// GET /api/admin/payroll/settings - Get all payroll settings
+app.get('/api/admin/payroll/settings', authenticate, authorizeAdmin, async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM payroll_settings ORDER BY setting_name');
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Error fetching payroll settings:', error.message, error.stack);
+        res.status(500).json({ message: 'Server error fetching payroll settings.' });
+    }
+});
+
+// DELETE /api/admin/payroll/settings/:id - Delete a specific payroll setting
+app.delete('/api/admin/payroll/settings/:id', authenticate, authorizeAdmin, async (req, res) => {
+    const { id } = req.params;
+    try {
+        const result = await pool.query('DELETE FROM payroll_settings WHERE id = $1 RETURNING *', [id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: 'Payroll setting not found.' });
+        }
+        res.json({ message: 'Payroll setting deleted successfully.', deletedSetting: result.rows[0] });
+    } catch (error) {
+        console.error('Error deleting payroll setting:', error.message, error.stack);
+        res.status(500).json({ message: 'Server error deleting payroll setting.' });
+    }
+});
+
+
+// POST /api/admin/salary-structures - Set/Update an employee's salary structure
+// Body: { userId: 'uuid', effectiveDate: 'YYYY-MM-DD', basicSalary: 15000, hra: 7500, ... }
+app.post('/api/admin/salary-structures', authenticate, authorizeAdmin, async (req, res) => {
+    const { userId, effectiveDate, basicSalary, hra, conveyanceAllowance, medicalAllowance, specialAllowance, lta, otherEarnings, grossSalary } = req.body;
+
+    // Basic validation
+    if (!userId || !effectiveDate || !basicSalary || !hra || !grossSalary) {
+        return res.status(400).json({ message: 'Missing required salary structure fields.' });
+    }
+
+    try {
+        const result = await pool.query(
+            `INSERT INTO salary_structures (user_id, effective_date, basic_salary, hra, conveyance_allowance, medical_allowance, special_allowance, lta, other_earnings, gross_salary)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             ON CONFLICT (user_id, effective_date) DO UPDATE SET
+                basic_salary = EXCLUDED.basic_salary,
+                hra = EXCLUDED.hra,
+                conveyance_allowance = EXCLUDED.conveyance_allowance,
+                medical_allowance = EXCLUDED.medical_allowance,
+                special_allowance = EXCLUDED.special_allowance,
+                lta = EXCLUDED.lta,
+                other_earnings = EXCLUDED.other_earnings,
+                gross_salary = EXCLUDED.gross_salary,
+                updated_at = CURRENT_TIMESTAMP
+             RETURNING *`,
+            [userId, effectiveDate, basicSalary, hra, conveyanceAllowance || 0, medicalAllowance || 0, specialAllowance || 0, lta || 0, otherEarnings || {}, grossSalary]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (error) {
+        console.error('Error saving salary structure:', error.message, error.stack);
+        res.status(500).json({ message: 'Server error saving salary structure.' });
+    }
+});
+
+// GET /api/admin/salary-structures/:userId - Get an employee's salary structures (latest first)
+app.get('/api/admin/salary-structures/:userId', authenticate, authorizeAdmin, async (req, res) => {
+    const { userId } = req.params;
+    try {
+        const result = await pool.query(
+            'SELECT * FROM salary_structures WHERE user_id = $1 ORDER BY effective_date DESC',
+            [userId]
+        );
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Error fetching salary structures:', error.message, error.stack);
+        res.status(500).json({ message: 'Server error fetching salary structures.' });
+    }
+});
+
+
+// Helper function to map day names to Moment.js day numbers (0-6)
+const dayNameToMomentDay = {
+    'Sunday': 0,
+    'Monday': 1,
+    'Tuesday': 2,
+    'Wednesday': 3,
+    'Thursday': 4,
+    'Friday': 5,
+    'Saturday': 6
+};
+
+// Helper function to calculate attendance summary (used by both summary and payroll calculation)
+async function calculateAttendanceSummary(userId, year, month, client) {
+    console.log(`[CODE_VERSION_CHECK] Running calculateAttendanceSummary v8.15 (July 7, 2025 - Analytics Fix)`);
+    // Ensure month is always two digits for consistent parsing
+    const formattedMonth = String(month).padStart(2, '0');
+    const startDateOfMonth = moment.utc(`${year}-${formattedMonth}-01`);
+    const endDateOfMonth = moment.utc(startDateOfMonth).endOf('month');
+    const totalCalendarDays = endDateOfMonth.date(); // Number of days in the month
+
+    console.log(`[ATTENDANCE_SUMMARY_DEBUG] Calculating for User ID: ${userId}, Month: ${formattedMonth}, Year: ${year}`);
+    console.log(`[ATTENDANCE_SUMMARY_DEBUG] Period: ${startDateOfMonth.format('YYYY-MM-DD')} to ${endDateOfMonth.format('YYYY-MM-DD')}`);
+
+    // Fetch all weekly off configurations for the employee that are relevant to the month
+    const weeklyOffsConfigResult = await client.query(
+        `SELECT weekly_off_days, effective_date, end_date FROM weekly_offs
+         WHERE user_id = $1
+         AND effective_date <= $2`, // Weekly off config is effective from this date onwards
+        [userId, endDateOfMonth.format('YYYY-MM-DD')]
+    );
+    const weeklyOffsConfig = weeklyOffsConfigResult.rows;
+    console.log(`[ATTENDANCE_SUMMARY_DEBUG] Raw weekly_offs_config from DB (${weeklyOffsConfig.length} rows):`, weeklyOffsConfig);
+
+    // Fetch all public holidays for the month
+    const holidaysResult = await client.query(
+        `SELECT holiday_date FROM holidays
+         WHERE holiday_date BETWEEN $1 AND $2`,
+        [startDateOfMonth.format('YYYY-MM-DD'), endDateOfMonth.format('YYYY-MM-DD')]
+    );
+    const publicHolidayDates = new Set(holidaysResult.rows.map(row => moment.utc(row.holiday_date).format('YYYY-MM-DD')));
+    console.log(`[ATTENDANCE_SUMMARY_DEBUG] Public Holiday Dates for month:`, Array.from(publicHolidayDates));
+
+    // Fetch attendance records for the month
+    const attendanceRecords = (await client.query(
+        `SELECT date, status, check_in, check_out, working_hours, late_time, extra_hours FROM attendance
+         WHERE user_id = $1 AND EXTRACT(MONTH FROM date) = $2 AND EXTRACT(YEAR FROM date) = $3`,
+        [userId, month, year]
+    )).rows;
+    console.log(`[ATTENDANCE_SUMMARY_DEBUG] Raw attendance records from DB (${attendanceRecords.length} rows):`, attendanceRecords);
+
+    const attendanceMap = new Map(
+        attendanceRecords.map(att => [moment.utc(att.date).format('YYYY-MM-DD'), att])
+    );
+
+    let presentDays = 0;
+    let lateDays = 0;
+    let onLeaveDays = 0; // This will count *paid* leaves from attendance status
+    let lopDays = 0; // This will count *unpaid* leaves from attendance status
+    let absentWorkingDays = 0; // Days that should have been worked but weren't present/leave/lop
+    let totalActualWorkingHours = 0;
+    let actualWeeklyOffDays = 0;
+    let holidaysCount = 0;
+    let totalExpectedWorkingDays = 0; // Days employee was expected to work (not WO, not Holiday)
+
+    const today = moment.utc().startOf('day');
+
+    // Map to store daily statuses for the attendance history table / analytics display
+    const dailyStatusMap = new Map();
+
+
+    for (let day = 1; day <= totalCalendarDays; day++) {
+        const currentDate = moment.utc(`${year}-${formattedMonth}-${String(day).padStart(2, '0')}`);
+        const formattedDate = currentDate.format('YYYY-MM-DD');
+        const currentMomentDayOfWeek = currentDate.day(); // 0 for Sunday, 6 for Saturday
+
+        // Determine the most recent weekly off configuration for the current date
+        const relevantWeeklyOffConfig = weeklyOffsConfig
+            .filter(row => moment.utc(row.effective_date).isSameOrBefore(currentDate, 'day'))
+            .sort((a, b) => moment.utc(b.effective_date).diff(moment.utc(a.effective_date)))[0]; // Get the latest one
+
+        let isWeeklyOffForThisDay = false;
+        if (relevantWeeklyOffConfig && Array.isArray(relevantWeeklyOffConfig.weekly_off_days)) {
+            const woEffectiveDate = moment.utc(relevantWeeklyOffConfig.effective_date);
+            const woEndDate = relevantWeeklyOffConfig.end_date ? moment.utc(relevantWeeklyOffConfig.end_date) : null;
+
+            isWeeklyOffForThisDay = relevantWeeklyOffConfig.weekly_off_days.includes(currentMomentDayOfWeek) &&
+                                    currentDate.isSameOrAfter(woEffectiveDate, 'day') &&
+                                    (!woEndDate || currentDate.isSameOrBefore(woEndDate, 'day'));
+        }
+
+        const isPublicHoliday = publicHolidayDates.has(formattedDate);
+
+        // Skip if it's a holiday or weekly off
+        if (isPublicHoliday) {
+            holidaysCount++;
+            dailyStatusMap.set(formattedDate, 'HOLIDAY');
+            continue;
+        }
+        if (isWeeklyOffForThisDay) {
+            actualWeeklyOffDays++;
+            dailyStatusMap.set(formattedDate, 'WEEKLY OFF');
+            continue;
+        }
+
+        // This is an expected working day (not holiday or weekly off)
+        totalExpectedWorkingDays++; // Increment here for accurate total working days
+
+        const record = attendanceMap.get(formattedDate);
+        let dayCategorized = false; // Flag to ensure a day is categorized only once
+
+        // --- NEW LOGIC: Directly use attendance.status for counts ---
+        if (record) {
+            switch (record.status.toUpperCase()) {
+                case 'PRESENT':
+                    presentDays++;
+                    totalActualWorkingHours += (parseFloat(record.working_hours) || 0);
+                    dailyStatusMap.set(formattedDate, 'PRESENT');
+                    console.log(`[ATTENDANCE_SUMMARY_DEBUG] Date: ${formattedDate} - Counted as PRESENT (Working Hours: ${record.working_hours || 0})`);
+                    dayCategorized = true;
+                    break;
+                case 'LATE':
+                    presentDays++; // Still a present day
+                    lateDays++;
+                    totalActualWorkingHours += (parseFloat(record.working_hours) || 0);
+                    dailyStatusMap.set(formattedDate, 'LATE');
+                    console.log(`[ATTENDANCE_SUMMARY_DEBUG] Date: ${formattedDate} - Counted as LATE/PRESENT (Working Hours: ${record.working_hours || 0})`);
+                    dayCategorized = true;
+                    break;
+                case 'ON_LEAVE': // This is the paid leave status from attendance table
+                    onLeaveDays++;
+                    dailyStatusMap.set(formattedDate, 'ON LEAVE');
+                    console.log(`[ATTENDANCE_SUMMARY_DEBUG] Date: ${formattedDate} - Counted as ON LEAVE (Paid)`);
+                    dayCategorized = true;
+                    break;
+                case 'LOP': // This is the unpaid leave status from attendance table
+                    lopDays++;
+                    dailyStatusMap.set(formattedDate, 'LOP');
+                    console.log(`[ATTENDANCE_SUMMARY_DEBUG] Date: ${formattedDate} - Counted as LOP (Unpaid)`);
+                    dayCategorized = true;
+                    break;
+                case 'HALF-DAY':
+                    presentDays += 0.5; // Count as half present
+                    totalActualWorkingHours += (parseFloat(record.working_hours) || 0);
+                    dailyStatusMap.set(formattedDate, 'HALF-DAY');
+                    console.log(`[ATTENDANCE_SUMMARY_DEBUG] Date: ${formattedDate} - Counted as HALF-DAY ATTENDANCE (Working Hours: ${record.working_hours || 0})`);
+                    dayCategorized = true;
+                    break;
+                case 'ABSENT':
+                    absentWorkingDays++;
+                    dailyStatusMap.set(formattedDate, 'ABSENT');
+                    console.log(`[ATTENDANCE_SUMMARY_DEBUG] Date: ${formattedDate} - Counted as ABSENT (from attendance record)`);
+                    dayCategorized = true;
+                    break;
+                default:
+                    // If it's a past/current day and not explicitly handled by a known status, it's an absent day
+                    if (currentDate.isSameOrBefore(today, 'day')) {
+                        absentWorkingDays++;
+                        dailyStatusMap.set(formattedDate, 'ABSENT');
+                        console.log(`[ATTENDANCE_SUMMARY_DEBUG] Date: ${formattedDate} - Defaulted to ABSENT (unhandled status in record)`);
+                    } else {
+                        dailyStatusMap.set(formattedDate, 'N/A'); // Future days are N/A
+                        console.log(`[ATTENDANCE_SUMMARY_DEBUG] Date: ${formattedDate} - Future day with no record, not counted as absent.`);
+                    }
+                    dayCategorized = true; // Still categorized, even if unknown status
+                    break;
+            }
+        }
+
+        // If no attendance record, and not categorized by holiday/weekly off, and it's a past/current working day
+        if (!dayCategorized && !record && currentDate.isSameOrBefore(today, 'day')) {
+            absentWorkingDays++;
+            dailyStatusMap.set(formattedDate, 'ABSENT');
+            console.log(`[ATTENDANCE_SUMMARY_DEBUG] Date: ${formattedDate} - Counted as ABSENT (no attendance record found for past/current working day)`);
+        } else if (!dayCategorized && !record && currentDate.isAfter(today, 'day')) {
+            dailyStatusMap.set(formattedDate, 'N/A'); // Future days without records are N/A
+            console.log(`[ATTENDANCE_SUMMARY_DEBUG] Date: ${formattedDate} - Future day with no record, not counted as absent.`);
+        }
+    }
+
+    // Final calculation adjustments
+    // paidDays now explicitly counts days marked as 'on_leave' in attendance
+    // unpaidLeaves now explicitly counts days marked as 'lop' or 'absent' in attendance
+    const totalUnpaidLeaves = lopDays + absentWorkingDays; // LOP days + general absent days
+
+    // paidDays should be the sum of present, late, and on_leave days
+    // This needs to be carefully defined for payroll purposes.
+    // For general analytics, `onLeaveDays` is your "Paid Leave Days"
+    // `lopDays` is your "LOP Days"
+    // `absentWorkingDays` are unapproved absences.
+    // `presentDays` includes 'PRESENT' and 'LATE' statuses.
+
+    // For payroll, "Paid Days" are typically Present + Late + On_Leave
+    const paidDaysForPayroll = presentDays + onLeaveDays;
+
+    const totalDaysForAvgHours = presentDays + onLeaveDays; // Sum of physically present days and paid leave days
+    const averageDailyHours = totalDaysForAvgHours > 0 ? parseFloat((totalActualWorkingHours / totalDaysForAvgHours).toFixed(2)) : 0;
+
+
+    console.log(`[ATTENDANCE_SUMMARY_DEBUG] Final Counts:`);
+    console.log(`[ATTENDANCE_SUMMARY_DEBUG]   Present Days: ${presentDays}`);
+    console.log(`[ATTENDANCE_SUMMARY_DEBUG]   Late Days (from attendance): ${lateDays}`);
+    console.log(`[ATTENDANCE_SUMMARY_DEBUG]   On Leave Days (Paid Approved Leaves from Attendance): ${onLeaveDays}`);
+    console.log(`[ATTENDANCE_SUMMARY_DEBUG]   LOP Days (Unpaid Leaves from Attendance): ${lopDays}`);
+    console.log(`[ATTENDANCE_SUMMARY_DEBUG]   Absent Working Days (from Attendance): ${absentWorkingDays}`);
+    console.log(`[ATTENDANCE_SUMMARY_DEBUG]   Total Unpaid Leaves (LOP + Absent): ${totalUnpaidLeaves}`);
+    console.log(`[ATTENDANCE_SUMMARY_DEBUG]   Paid Days (for Payroll): ${paidDaysForPayroll}`);
+    console.log(`[ATTENDANCE_SUMMARY_DEBUG]   Total Actual Working Hours: ${totalActualWorkingHours.toFixed(2)}`);
+    console.log(`[ATTENDANCE_SUMMARY_DEBUG]   Average Daily Hours: ${averageDailyHours}`);
+    console.log(`[ATTENDANCE_SUMMARY_DEBUG]   Holidays Count: ${holidaysCount}`);
+    console.log(`[ATTENDANCE_SUMMARY_DEBUG]   Actual Weekly Off Days: ${actualWeeklyOffDays}`);
+    console.log(`[ATTENDANCE_SUMMARY_DEBUG]   Total Expected Working Days in Month: ${totalExpectedWorkingDays}`);
+
+
+    return {
+        totalCalendarDays,
+        totalWorkingDaysInMonth: totalExpectedWorkingDays,
+        actualWeeklyOffDays,
+        holidaysCount,
+        presentDays: parseFloat(presentDays.toFixed(2)),
+        lateDays: parseFloat(lateDays.toFixed(2)),
+        leaveDays: parseFloat(onLeaveDays.toFixed(2)), // This is the count of 'on_leave' days from attendance
+        lopDays: parseFloat(lopDays.toFixed(2)),     // This is the count of 'lop' days from attendance
+        absentDays: parseFloat(absentWorkingDays.toFixed(2)), // Unaccounted absences
+        paidDays: parseFloat(paidDaysForPayroll.toFixed(2)), // Total paid days for salary calculation
+        unpaidLeaves: parseFloat(totalUnpaidLeaves.toFixed(2)), // Total unpaid for salary calculation
+        totalWorkingHours: parseFloat(totalActualWorkingHours.toFixed(2)),
+        averageDailyHours: averageDailyHours,
+        dailyStatusMap: Object.fromEntries(dailyStatusMap) // Convert Map to plain object for JSON serialization
+    };
+}
+
+// GET /api/admin/attendance/summary/:userId/:year/:month - Get attendance summary for a specific employee and month
+app.get('/api/admin/attendance/summary/:userId/:year/:month', authenticate, authorizeAdmin, async (req, res) => {
+    const { userId, year, month } = req.params;
+    const client = await pool.connect();
+    try {
+        const summary = await calculateAttendanceSummary(userId, parseInt(year), parseInt(month), client);
+        res.json(summary);
+    } catch (error) {
+        console.error('Error fetching employee attendance summary:', error.message, error.stack);
+        res.status(500).json({ message: 'Server error fetching attendance summary.' });
+    } finally {
+        client.release();
+    }
+});
+
+
+// GET /api/admin/payroll/preview/:userId/:year/:month - Preview payslip calculation for a single employee
+app.get('/api/admin/payroll/preview/:userId/:year/:month', authenticate, authorizeAdmin, async (req, res) => {
+    const { userId, year, month } = req.params;
+    const client = await pool.connect();
+
+    try {
+        // Fetch necessary payroll settings
+        const payrollSettings = (await client.query('SELECT setting_name, setting_value FROM payroll_settings')).rows.reduce((acc, s) => {
+            acc[s.setting_name] = s.setting_value;
+            return acc;
+        }, {});
+
+        const EPF_EMPLOYEE_RATE = parseFloat(payrollSettings.EPF_EMPLOYEE_RATE || '0.12');
+        const EPF_EMPLOYER_RATE = parseFloat(payrollSettings.EPF_EMPLOYER_RATE || '0.12');
+        const EPF_MAX_SALARY_LIMIT = parseFloat(payrollSettings.EPF_MAX_SALARY_LIMIT || '15000');
+        const ESI_EMPLOYEE_RATE = parseFloat(payrollSettings.ESI_EMPLOYEE_RATE || '0.0075');
+        const ESI_EMPLOYER_RATE = parseFloat(payrollSettings.ESI_EMPLOYER_RATE || '0.0325');
+        const ESI_WAGE_LIMIT = parseFloat(payrollSettings.ESI_WAGE_LIMIT || '21000');
+        const PROFESSIONAL_TAX_WEST_BENGAL_RATE = parseFloat(payrollSettings.PROFESSIONAL_TAX_WEST_BENGAL || '200');
+
+        // Fetch Employee's Latest Salary Structure
+        let salaryStructure = null;
+        const salaryStructureResult = await client.query(
+            'SELECT * FROM salary_structures WHERE user_id = $1 ORDER BY effective_date DESC LIMIT 1',
+            [userId]
+        );
+        salaryStructure = salaryStructureResult.rows[0];
+
+
+        if (!salaryStructure) {
+            return res.status(404).json({ message: 'No salary structure found for this employee.' });
+        }
+
+        // Get detailed attendance summary using the helper function
+        const attendanceSummary = await calculateAttendanceSummary(userId, parseInt(year), parseInt(month), client);
+
+        const totalDaysInMonth = attendanceSummary.totalCalendarDays; // Calendar days, for pro-rata denominator
+        const paidDays = attendanceSummary.paidDays; // Actual paid days for salary calculation
+        const totalUnpaidDays = attendanceSummary.unpaidLeaves;
+
+
+        // Earnings Calculation (Pro-rata based on paidDays)
+        const proRataFactor = (attendanceSummary.totalWorkingDaysInMonth > 0) ? (paidDays / attendanceSummary.totalWorkingDaysInMonth) : 0;
+
+        let basicSalaryMonthly = salaryStructure.basic_salary * proRataFactor;
+        let hraMonthly = salaryStructure.hra * proRataFactor;
+        let conveyanceAllowanceMonthly = salaryStructure.conveyance_allowance * proRataFactor;
+        let medicalAllowanceMonthly = salaryStructure.medical_allowance * proRataFactor;
+        let specialAllowanceMonthly = salaryStructure.special_allowance * proRataFactor;
+        let ltaMonthly = salaryStructure.lta * proRataFactor;
+
+        let grossEarnings = basicSalaryMonthly + hraMonthly + conveyanceAllowanceMonthly + medicalAllowanceMonthly + specialAllowanceMonthly + ltaMonthly;
+
+        let otherEarningsParsed = {};
+        if (salaryStructure.other_earnings) {
+            try {
+                otherEarningsParsed = salaryStructure.other_earnings;
+                for (const key in otherEarningsParsed) {
+                    grossEarnings += (parseFloat(otherEarningsParsed[key]) || 0) * proRataFactor;
+                }
+            } catch (e) {
+                console.error(`Error parsing other_earnings for user ${userId} during preview:`, e);
+            }
+        }
+
+
+        // Statutory Deductions Calculation
+        let totalDeductions = 0;
+        let epfEmployee = 0;
+        let epfEmployer = 0;
+        let esiEmployee = 0;
+        let esiEmployer = 0;
+        let professionalTax = 0;
+        let tds = 0;
+        let loanDeduction = 0;
+        let otherDeductions = {};
+
+        // EPF Calculation
+        const epfApplicableSalary = Math.min(basicSalaryMonthly, EPF_MAX_SALARY_LIMIT);
+        epfEmployee = epfApplicableSalary * EPF_EMPLOYEE_RATE;
+        epfEmployer = epfApplicableSalary * EPF_EMPLOYER_RATE;
+        totalDeductions += epfEmployee;
+
+        // ESI Calculation
+        if (grossEarnings <= ESI_WAGE_LIMIT) {
+            esiEmployee = grossEarnings * ESI_EMPLOYEE_RATE;
+            esiEmployer = grossEarnings * ESI_EMPLOYER_RATE;
+            totalDeductions += esiEmployee;
+        }
+
+        // Professional Tax Calculation for West Bengal (Fixed ₹200 if gross earnings > 0)
+        if (grossEarnings > 0) {
+            professionalTax = PROFESSIONAL_TAX_WEST_BENGAL_RATE;
+        } else {
+            professionalTax = 0;
+        }
+        totalDeductions += professionalTax;
+
+        tds = 0; // Placeholder
+        totalDeductions += tds;
+
+        loanDeduction = 0; // Placeholder
+        totalDeductions += loanDeduction;
+
+        // Net Pay Calculation
+        let netPay = grossEarnings - totalDeductions;
+
+        // Round all numeric values to 2 decimal places
+        const previewResult = {
+            payslip_month: parseInt(month),
+            payslip_year: parseInt(year),
+            gross_earnings: parseFloat(grossEarnings.toFixed(2)),
+            basic_salary: parseFloat(basicSalaryMonthly.toFixed(2)),
+            hra: parseFloat(hraMonthly.toFixed(2)),
+            conveyance_allowance: parseFloat(conveyanceAllowanceMonthly.toFixed(2)),
+            medical_allowance: parseFloat(medicalAllowanceMonthly.toFixed(2)),
+            special_allowance: parseFloat(specialAllowanceMonthly.toFixed(2)),
+            lta: parseFloat(ltaMonthly.toFixed(2)),
+            other_earnings: otherEarningsParsed,
+            total_deductions: parseFloat(totalDeductions.toFixed(2)),
+            epf_employee: parseFloat(epfEmployee.toFixed(2)),
+            epf_employer: parseFloat(epfEmployer.toFixed(2)),
+            esi_employee: parseFloat(esiEmployee.toFixed(2)),
+            esi_employer: parseFloat(esiEmployer.toFixed(2)),
+            professional_tax: parseFloat(professionalTax.toFixed(2)),
+            tds: parseFloat(tds.toFixed(2)),
+            loan_deduction: parseFloat(loanDeduction.toFixed(2)),
+            other_deductions: otherDeductions,
+            net_pay: parseFloat(netPay.toFixed(2)),
+            paid_days: parseFloat(paidDays.toFixed(2)),
+            unpaid_leaves: parseFloat(totalUnpaidDays.toFixed(2)),
+            // Include more detailed attendance summary for transparency
+            attendance_summary: {
+                totalCalendarDays: attendanceSummary.totalCalendarDays,
+                totalWorkingDaysInMonth: attendanceSummary.totalWorkingDaysInMonth,
+                actualWeeklyOffDays: attendanceSummary.actualWeeklyOffDays,
+                presentDays: attendanceSummary.presentDays,
+                lateDays: attendanceSummary.lateDays,
+                leaveDays: attendanceSummary.leaveDays,
+                lopDays: attendanceSummary.lopDays,
+                absentDays: attendanceSummary.absentDays,
+                totalWorkingHours: attendanceSummary.totalWorkingHours,
+                averageDailyHours: attendanceSummary.averageDailyHours
+            }
+        };
+
+        res.json(previewResult);
+
+    } catch (error) {
+        console.error('Error previewing payroll:', error.message, error.stack);
+        res.status(500).json({ message: 'Server error previewing payroll.', error: error.message });
+    } finally {
+        client.release();
+    }
+});
+
+
+// POST /api/admin/payroll/run - Initiate a payroll calculation for a month/year
+// This endpoint will now also generate PDF payslips and store their paths.
+app.post('/api/admin/payroll/run', authenticate, authorizeAdmin, async (req, res) => {
+    const { month, year } = req.body;
+    const adminId = req.user.id; // Admin performing the run
+    const client = await pool.connect();
+
+    if (!month || !year) {
+        return res.status(400).json({ message: 'Payroll month and year are required.' });
+    }
+
+    try {
+        await client.query('BEGIN');
+
+        // Check if a payroll run for this month/year already exists
+        let payrollRunResult = await client.query(
+            'SELECT id FROM payroll_runs WHERE payroll_month = $1 AND payroll_year = $2',
+            [month, year]
+        );
+        let payrollRunId;
+
+        if (payrollRunResult.rows.length > 0) {
+            payrollRunId = payrollRunResult.rows[0].id;
+            // Optionally, update status to 'Recalculating' or similar
+            await client.query(
+                `UPDATE payroll_runs SET status = 'Recalculating', updated_at = CURRENT_TIMESTAMP, processed_by = $1
+                 WHERE id = $2`,
+                [adminId, payrollRunId]
+            );
+            // Delete existing payslips for this run to recalculate
+            await client.query('DELETE FROM payslips WHERE payroll_run_id = $1', [payrollRunId]);
+        } else {
+            // Create a new payroll run record
+            const newRunResult = await client.query(
+                `INSERT INTO payroll_runs (payroll_month, payroll_year, status, processed_by)
+                 VALUES ($1, $2, 'Calculating', $3) RETURNING id`,
+                [month, year, adminId]
+            );
+            payrollRunId = newRun.rows[0].id;
+        }
+
+        // --- FETCH NECESSARY PAYROLL SETTINGS ---
+        const payrollSettings = (await client.query('SELECT setting_name, setting_value FROM payroll_settings')).rows.reduce((acc, s) => {
+            acc[s.setting_name] = s.setting_value;
+            return acc;
+        }, {});
+
+        const EPF_EMPLOYEE_RATE = parseFloat(payrollSettings.EPF_EMPLOYEE_RATE || '0.12');
+        const EPF_EMPLOYER_RATE = parseFloat(payrollSettings.EPF_EMPLOYER_RATE || '0.12');
+        const EPF_MAX_SALARY_LIMIT = parseFloat(payrollSettings.EPF_MAX_SALARY_LIMIT || '15000'); // Usually Basic + DA
+        const ESI_EMPLOYEE_RATE = parseFloat(payrollSettings.ESI_EMPLOYEE_RATE || '0.0075');
+        const ESI_EMPLOYER_RATE = parseFloat(payrollSettings.ESI_EMPLOYER_RATE || '0.0325');
+        const ESI_WAGE_LIMIT = parseFloat(payrollSettings.ESI_WAGE_LIMIT || '21000');
+        const PROFESSIONAL_TAX_WEST_BENGAL_RATE = parseFloat(payrollSettings.PROFESSIONAL_TAX_WEST_BENGAL || '200');
+
+
+        // --- FETCH ALL ACTIVE EMPLOYEES ---
+        const employees = (await client.query('SELECT id, name, employee_id, email FROM users WHERE role IN ($1, $2)', ['employee', 'admin'])).rows; // Include admins if they get payslips
+
+        for (const employee of employees) {
+            const userId = employee.id;
+            console.log(`Processing payroll for: ${employee.name} (ID: ${userId})`);
+
+            // 1. Fetch Employee's Latest Salary Structure
+            let salaryStructure = (await client.query(
+                'SELECT * FROM salary_structures WHERE user_id = $1 ORDER BY effective_date DESC LIMIT 1',
+                [userId]
+            )).rows[0];
+
+            if (!salaryStructure) {
+                console.warn(`No salary structure found for user ${employee.name} (${userId}). Skipping payslip generation.`);
+                continue; // Skip if no salary structure defined
+            }
+
+            // 2. Get detailed attendance summary using the helper function
+            const attendanceSummary = await calculateAttendanceSummary(userId, parseInt(year), parseInt(month), client);
+
+            const totalDaysInMonth = attendanceSummary.totalCalendarDays; // Calendar days, for pro-rata denominator
+            const paidDays = attendanceSummary.paidDays; // Actual paid days for salary calculation
+            const unpaidLeaves = attendanceSummary.unpaidLeaves;
+
+
+            // 3. Earnings Calculation (Pro-rata based on paidDays)
+            const proRataFactor = (attendanceSummary.totalWorkingDaysInMonth > 0) ? (paidDays / attendanceSummary.totalWorkingDaysInMonth) : 0;
+
+            let basicSalaryMonthly = salaryStructure.basic_salary * proRataFactor;
+            let hraMonthly = salaryStructure.hra * proRataFactor;
+            let conveyanceAllowanceMonthly = salaryStructure.conveyance_allowance * proRataFactor;
+            let medicalAllowanceMonthly = salaryStructure.medical_allowance * proRataFactor;
+            let specialAllowanceMonthly = salaryStructure.special_allowance * proRataFactor;
+            let ltaMonthly = salaryStructure.lta * proRataFactor;
+
+            let grossEarnings = basicSalaryMonthly + hraMonthly + conveyanceAllowanceMonthly + medicalAllowanceMonthly + specialAllowanceMonthly + ltaMonthly;
+
+            let otherEarningsParsed = {};
+            if (salaryStructure.other_earnings) {
+                try {
+                    otherEarningsParsed = salaryStructure.other_earnings; // Already JSONB, no need to parse again
+                    for (const key in otherEarningsParsed) {
+                        grossEarnings += (parseFloat(otherEarningsParsed[key]) || 0) * proRataFactor;
+                    }
+                } catch (e) {
+                    console.error(`Error parsing other_earnings for user ${userId}:`, e);
+                }
+            }
+
+
+            // 4. Statutory Deductions Calculation
+            let totalDeductions = 0;
+            let epfEmployee = 0;
+            let epfEmployer = 0; // Employer contribution is usually displayed on payslip
+            let esiEmployee = 0;
+            let esiEmployer = 0;
+            let professionalTax = 0;
+            let tds = 0; // Tax Deducted at Source
+            let loanDeduction = 0; // Placeholder for future loan deductions
+            let otherDeductions = {}; // Placeholder for other custom deductions
+
+            // EPF Calculation (Employee & Employer Share)
+            const epfApplicableSalary = Math.min(basicSalaryMonthly, EPF_MAX_SALARY_LIMIT);
+            epfEmployee = epfApplicableSalary * EPF_EMPLOYEE_RATE;
+            epfEmployer = epfApplicableSalary * EPF_EMPLOYER_RATE; // Employer share, often shown for transparency
+            totalDeductions += epfEmployee;
+
+            // ESI Calculation
+            if (grossEarnings <= ESI_WAGE_LIMIT) {
+                esiEmployee = grossEarnings * ESI_EMPLOYEE_RATE;
+                esiEmployer = grossEarnings * ESI_EMPLOYER_RATE;
+                totalDeductions += esiEmployee;
+            }
+
+            // Professional Tax Calculation for West Bengal (Fixed ₹200 if gross earnings > 0)
+            if (grossEarnings > 0) {
+                professionalTax = PROFESSIONAL_TAX_WEST_BENGAL_RATE;
+            } else {
+                professionalTax = 0;
+            }
+            totalDeductions += professionalTax;
+
+            tds = 0; // **IMPORTANT: Implement actual TDS calculation here based on full Indian IT rules**
+            totalDeductions += tds;
+
+            loanDeduction = 0; // Example: fetch from a 'employee_loans' table
+            totalDeductions += loanDeduction;
+
+            // 5. Net Pay Calculation
+            let netPay = grossEarnings - totalDeductions;
+
+            // Round all numeric values to 2 decimal places for storage
+            grossEarnings = parseFloat(grossEarnings.toFixed(2));
+            basicSalaryMonthly = parseFloat(basicSalaryMonthly.toFixed(2));
+            hraMonthly = parseFloat(hraMonthly.toFixed(2));
+            conveyanceAllowanceMonthly = parseFloat(conveyanceAllowanceMonthly.toFixed(2));
+            medicalAllowanceMonthly = parseFloat(medicalAllowanceMonthly.toFixed(2));
+            specialAllowanceMonthly = parseFloat(specialAllowanceMonthly.toFixed(2));
+            ltaMonthly = parseFloat(ltaMonthly.toFixed(2));
+            totalDeductions = parseFloat(totalDeductions.toFixed(2));
+            epfEmployee = parseFloat(epfEmployee.toFixed(2));
+            epfEmployer = parseFloat(epfEmployer.toFixed(2));
+            esiEmployee = parseFloat(esiEmployee.toFixed(2));
+            esiEmployer = parseFloat(esiEmployer.toFixed(2));
+            professionalTax = parseFloat(professionalTax.toFixed(2));
+            tds = parseFloat(tds.toFixed(2));
+            loanDeduction = parseFloat(loanDeduction.toFixed(2));
+            netPay = parseFloat(netPay.toFixed(2));
+
+            // Construct payslip data object for PDF generation
+            const payslipData = {
+                employeeName: employee.name,
+                employeeId: employee.employee_id,
+                payslipMonth: month,
+                payslipYear: year,
+                grossEarnings,
+                basicSalary: basicSalaryMonthly,
+                hra: hraMonthly,
+                conveyanceAllowance: conveyanceAllowanceMonthly,
+                medicalAllowance: medicalAllowanceMonthly,
+                specialAllowance: specialAllowanceMonthly,
+                lta: ltaMonthly,
+                otherEarnings: otherEarningsParsed,
+                totalDeductions,
+                epfEmployee,
+                epfEmployer,
+                esiEmployee,
+                esiEmployer,
+                professionalTax,
+                tds,
+                loanDeduction,
+                otherDeductions,
+                netPay,
+                paidDays,
+                unpaidLeaves,
+                daysPresent: attendanceSummary.presentDays + (attendanceSummary.halfDays * 0.5 || 0),
+                attendanceSummary: attendanceSummary
+            };
+
+            let payslipFilePath = null;
+            try {
+                const payslipFileName = `payslip_${employee.employee_id}_${year}_${String(month).padStart(2, '0')}.pdf`;
+                const payslipsDir = path.join(__dirname, 'uploads', 'payslips');
+                const fullPayslipPath = path.join(payslipsDir, payslipFileName);
+
+                if (!fs.existsSync(payslipsDir)) {
+                    fs.mkdirSync(payslipsDir, { recursive: true });
+                }
+                
+                const doc = new PDFDocument();
+                doc.pipe(fs.createWriteStream(fullPayslipPath));
+
+                doc.fontSize(18).text(`Payslip for ${payslipData.employeeName}`, { align: 'center' });
+                doc.fontSize(12).text(`Month: ${moment().month(payslipData.payslipMonth - 1).format('MMMM')} ${payslipData.payslipYear}`, { align: 'center' });
+                doc.moveDown();
+
+                doc.fontSize(14).text('Earnings:', { underline: true });
+                doc.fontSize(12)
+                   .text(`Basic Salary: ₹${payslipData.basicSalary}`)
+                   .text(`HRA: ₹${payslipData.hra}`)
+                   .text(`Conveyance Allowance: ₹${payslipData.conveyanceAllowance}`)
+                   .text(`Medical Allowance: ₹${payslipData.medicalAllowance}`)
+                   .text(`Special Allowance: ₹${payslipData.specialAllowance}`)
+                   .text(`LTA: ₹${payslipData.lta}`);
+
+                if (Object.keys(payslipData.otherEarnings).length > 0) {
+                    doc.text('Other Earnings:');
+                    for (const key in payslipData.otherEarnings) {
+                        doc.text(`  ${key}: ₹${payslipData.otherEarnings[key]}`);
+                    }
+                }
+                doc.text(`Gross Earnings: ₹${payslipData.grossEarnings}`);
+                doc.moveDown();
+
+                doc.fontSize(14).text('Deductions:', { underline: true });
+                doc.fontSize(12)
+                   .text(`EPF (Employee): ₹${payslipData.epfEmployee}`)
+                   .text(`ESI (Employee): ₹${payslipData.esiEmployee}`)
+                   .text(`Professional Tax: ₹${payslipData.professionalTax}`)
+                   .text(`TDS: ₹${payslipData.tds}`)
+                   .text(`Loan Deduction: ₹${payslipData.loanDeduction}`);
+                doc.text(`Total Deductions: ₹${payslipData.totalDeductions}`);
+                doc.moveDown();
+
+                doc.fontSize(16).text(`Net Pay: ₹${payslipData.netPay}`, { align: 'right' });
+
+                doc.end();
+                
+                payslipFilePath = path.join('uploads', 'payslips', payslipFileName);
+                console.log(`[PDF_GENERATION_INFO] PDF generated at: ${fullPayslipPath}`);
+
+            } catch (pdfError) {
+                console.error(`Error generating PDF for ${employee.name} (ID: ${userId}):`, pdfError.message);
+                payslipFilePath = null;
+            }
+
+
+            // 6. Insert/Update Payslip Record in the database
+            await client.query(
+                `INSERT INTO payslips (
+                    user_id, payroll_run_id, payslip_month, payslip_year,
+                    gross_earnings, basic_salary, hra, conveyance_allowance, medical_allowance, special_allowance, lta, other_earnings,
+                    total_deductions, epf_employee, epf_employer, esi_employee, esi_employer, professional_tax, tds, loan_deduction, other_deductions,
+                    net_pay, paid_days, unpaid_leaves, days_present, file_path
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+                ON CONFLICT (user_id, payslip_month, payslip_year) DO UPDATE SET
+                    gross_earnings = EXCLUDED.gross_earnings,
+                    basic_salary = EXCLUDED.basic_salary,
+                    hra = EXCLUDED.hra,
+                    conveyance_allowance = EXCLUDED.conveyance_allowance,
+                    medical_allowance = EXCLUDED.medical_allowance,
+                    special_allowance = EXCLUDED.special_allowance,
+                    lta = EXCLUDED.lta,
+                    other_earnings = EXCLUDED.other_earnings,
+                    total_deductions = EXCLUDED.total_deductions,
+                    epf_employee = EXCLUDED.epf_employee,
+                    epf_employer = EXCLUDED.epf_employer,
+                    esi_employee = EXCLUDED.esi_employee,
+                    esi_employer = EXCLUDED.esi_employer,
+                    professional_tax = EXCLUDED.professional_tax,
+                    tds = EXCLUDED.tds,
+                    loan_deduction = EXCLUDED.loan_deduction,
+                    other_deductions = EXCLUDED.other_deductions,
+                    net_pay = EXCLUDED.net_pay,
+                    paid_days = EXCLUDED.paid_days,
+                    unpaid_leaves = EXCLUDED.unpaid_leaves,
+                    days_present = EXCLUDED.days_present,
+                    file_path = COALESCE(EXCLUDED.file_path, payslips.file_path),
+                    updated_at = CURRENT_TIMESTAMP
+                RETURNING *`,
+                [
+                    userId, payrollRunId, month, year,
+                    grossEarnings, basicSalaryMonthly, hraMonthly, conveyanceAllowanceMonthly, medicalAllowanceMonthly, specialAllowanceMonthly, ltaMonthly, otherEarningsParsed,
+                    totalDeductions, epfEmployee, epfEmployer, esiEmployee, esiEmployer, professionalTax, tds, loanDeduction, otherDeductions,
+                    netPay, paidDays, unpaidLeaves, attendanceSummary.presentDays + (attendanceSummary.halfDays * 0.5 || 0),
+                    payslipFilePath
+                ]
+            );
+        }
+
+        // Update payroll run status to 'Calculated'
+        await client.query(
+            `UPDATE payroll_runs SET status = 'Calculated', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+            [payrollRunId]
+        );
+
+        await client.query('COMMIT');
+        res.json({ message: `Payroll for ${moment().month(month - 1).format('MMMM')} ${year} calculated successfully! Payslips generated and stored.`, payrollRunId });
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Error running payroll:', error.message, error.stack);
+        res.status(500).json({ message: 'Server error running payroll.', error: error.message });
+    } finally {
+        client.release();
+    }
+});
+
+// POST /api/admin/payslips/upload - Upload a payslip file (e.g., PDF) for an employee
+const payslipUpload = multer({
+    storage: multer.diskStorage({
+        destination: (req, file, cb) => {
+            const uploadPath = path.join(__dirname, 'uploads', 'payslips');
+            fs.mkdir(uploadPath, { recursive: true }, (err) => {
+                if (err) {
+                    console.error('Error creating payslip upload directory:', err);
+                    return cb(err);
+                }
+                cb(null, uploadPath);
+            });
+        },
+        filename: (req, file, cb) => {
+            const { userId, month, year } = req.body;
+            const filename = `payslip_${userId}_${year}_${month}${path.extname(file.originalname)}`;
+            cb(null, filename);
+        }
+    }),
+    fileFilter: (req, file, cb) => {
+        if (file.mimetype === 'application/pdf') {
+            cb(null, true);
+        } else {
+            cb(new Error('Only PDF files are allowed for payslips!'), false);
+        }
+    },
+    limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
+});
+
+app.post('/api/admin/payslips/upload', authenticate, authorizeAdmin, payslipUpload.single('payslipFile'), async (req, res) => {
+    const { userId, month, year } = req.body;
+    // Store relative path for database, absolute path for file system operations
+    const relativeFilePath = req.file ? path.join('uploads', 'payslips', req.file.filename) : null;
+
+    if (!userId || !month || !year || !relativeFilePath) {
+        return res.status(400).json({ message: 'Missing required fields or payslip file.' });
+    }
+
+    try {
+        // Find the payroll_run_id for the given month/year
+        let payrollRun = await pool.query(
+            'SELECT id FROM payroll_runs WHERE payroll_month = $1 AND payroll_year = $2',
+            [month, year]
+        );
+        let payrollRunId;
+        if (payrollRun.rows.length === 0) {
+            // If no payroll run exists, create a dummy one or reject
+            const newRun = await pool.query(
+                `INSERT INTO payroll_runs (payroll_month, payroll_year, status, processed_by, notes)
+                 VALUES ($1, $2, 'Uploaded', $3, 'Payslip uploaded manually') RETURNING id`,
+                [month, year, req.user.id]
+            );
+            payrollRunId = newRun.rows[0].id;
+        } else {
+            payrollRunId = payrollRun.rows[0].id;
+        }
+
+        // Insert or update payslip record with file path
+        const result = await pool.query(
+            `INSERT INTO payslips (user_id, payroll_run_id, payslip_month, payslip_year, file_path,
+                                  gross_earnings, basic_salary, hra, total_deductions, net_pay)
+             VALUES ($1, $2, $3, $4, $5, 0, 0, 0, 0, 0)
+             ON CONFLICT (user_id, payslip_month, payslip_year) DO UPDATE SET
+                file_path = EXCLUDED.file_path,
+                updated_at = CURRENT_TIMESTAMP
+             RETURNING *`,
+            [userId, payrollRunId, month, year, relativeFilePath]
+        );
+        res.status(201).json({ message: 'Payslip uploaded successfully!', payslip: result.rows[0] });
+    } catch (error) {
+        console.error('Error uploading payslip:', error.message, error.stack);
+        res.status(500).json({ message: 'Server error uploading payslip.', error: error.message });
+    }
+});
+
+// GET /api/admin/payslips/list/:userId - List all payslips for a specific employee (for admin view)
+app.get('/api/admin/payslips/list/:userId', authenticate, authorizeAdmin, async (req, res) => {
+    const { userId } = req.params;
+    try {
+        const result = await pool.query(
+            'SELECT * FROM payslips WHERE user_id = $1 ORDER BY payslip_year DESC, payslip_month DESC',
+            [userId]
+        );
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Error fetching employee payslips for admin:', error.message, error.stack);
+        res.status(500).json({ message: 'Server error fetching employee payslips.' });
+    }
+});
+
+// GET /api/admin/payslips/:payslipId/details - Get full details of a specific payslip
+app.get('/api/admin/payslips/:payslipId/details', authenticate, authorizeAdmin, async (req, res) => {
+    const { payslipId } = req.params;
+    try {
+        const result = await pool.query('SELECT * FROM payslips WHERE id = $1', [payslipId]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: 'Payslip not found.' });
+        }
+        res.json(result.rows[0]);
+    } catch (error) {
+        console.error('Error fetching payslip details:', error.message, error.stack);
+        res.status(500).json({ message: 'Server error fetching payslip details.' });
+    }
+});
+
+// --- EMPLOYEE PAYSLIP ROUTES ---
+
+// GET /api/employee/payslips/my - Get all payslips for the logged-in employee
+app.get('/api/employee/payslips/my', authenticate, async (req, res) => {
+    const userId = req.user.id; // Get user ID from authenticated token
+    try {
+        const result = await pool.query(
+            'SELECT id, payslip_month, payslip_year, gross_earnings, net_pay, file_path, created_at FROM payslips WHERE user_id = $1 ORDER BY payslip_year DESC, payslip_month DESC',
+            [userId]
+        );
+        res.json(result.rows);
+    }
+    catch (error) {
+        console.error('Error fetching my payslips:', error.message, error.stack);
+        res.status(500).json({ message: 'Server error fetching your payslips.' });
+    }
+});
+
+// GET /api/employee/payslips/:payslipId/download - Download a specific payslip file
+app.get('/api/employee/payslips/:payslipId/download', authenticate, async (req, res) => {
+    const { payslipId } = req.params;
+    const userId = req.user.id; // Get user ID from authenticated token
+
+    try {
+        const result = await pool.query(
+            'SELECT file_path FROM payslips WHERE id = $1 AND user_id = $2',
+            [payslipId, userId]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: 'Payslip not found or you do not have permission to download it.' });
+        }
+
+        const filePath = result.rows[0].file_path;
+        const absolutePath = path.join(__dirname, filePath); // Construct absolute path
+
+        // Ensure the file exists and is a PDF
+        if (fs.existsSync(absolutePath) && path.extname(absolutePath).toLowerCase() === '.pdf') {
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `attachment; filename="${path.basename(absolutePath)}"`);
+            res.sendFile(absolutePath);
+        } else {
+            res.status(404).json({ message: 'Payslip file not found or is not a PDF.' });
+        }
+    } catch (error) {
+        console.error('Error downloading payslip:', error.message, error.stack);
+        res.status(500).json({ message: 'Server error downloading payslip.' });
+    }
+});
+
+// GET /api/employee/weekly-offs - Get weekly off configurations for the logged-in employee
+app.get('/api/employee/weekly-offs', authenticate, async (req, res) => {
+    const user_id = req.user.id;
+    const { month, year } = req.query;
+
+    if (!month || !year) {
+        return res.status(400).json({ message: 'Month and year are required.' });
+    }
+
+    const startDateOfMonth = moment.utc(`${year}-${month}-01`);
+    const endDateOfMonth = moment.utc(startDateOfMonth).endOf('month');
+
+    const client = await pool.connect();
+    try {
+        const result = await client.query(
+            `SELECT id, user_id, weekly_off_days, effective_date FROM weekly_offs
+             WHERE user_id = $1
+             AND effective_date <= $2
+             ORDER BY effective_date DESC`, // Order by effective_date to get the most recent config
+            [user_id, endDateOfMonth.format('YYYY-MM-DD')]
+        );
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Error fetching employee weekly offs:', error.message, error.stack);
+        res.status(500).json({ message: 'Server error fetching weekly offs.' });
+    } finally {
+        client.release();
+    }
+});
+
+// GET /api/employee/holidays - Get public holidays for the month
+app.get('/api/employee/holidays', authenticate, async (req, res) => {
+    const { month, year } = req.query;
+
+    if (!month || !year) {
+        return res.status(400).json({ message: 'Month and year are required.' });
+    }
+
+    const startDateOfMonth = moment.utc(`${year}-${month}-01`);
+    const endDateOfMonth = moment.utc(startDateOfMonth).endOf('month');
+
+    const client = await pool.connect();
+    try {
+        const result = await client.query(
+            `SELECT id, holiday_date, holiday_name FROM holidays
+             WHERE holiday_date BETWEEN $1 AND $2
+             ORDER BY holiday_date`,
+            [startDateOfMonth.format('YYYY-MM-DD'), endDateOfMonth.format('YYYY-MM-DD')]
+        );
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Error fetching public holidays:', error.message, error.stack);
+        res.status(500).json({ message: 'Server error fetching public holidays.' });
+    } finally {
+        client.release();
+    }
+});
+
+
 
 // Legacy Endpoint Redirects (for backward compatibility)
-// These redirect to the /api/* endpoints
 app.get('/holidays', authenticate, async (req, res) => {
   res.redirect(307, `/api/holidays?${new URLSearchParams(req.query).toString()}`);
 });
@@ -3397,27 +4034,15 @@ app.get('/admin/analytics/monthly-summary', authenticate, authorizeAdmin, async 
 });
 
 app.post('/admin/leaves/update-cancellation', authenticate, authorizeAdmin, async (req, res) => {
-  // This endpoint is effectively handled by /api/admin/leaves/:id/status
-  // The frontend should call /api/admin/leaves/:id/status with status 'cancelled'
   const { id, status, admin_comment } = req.body;
-  if (status === 'approved') { // If admin approves cancellation request, the leave status becomes 'cancelled'
+  if (status === 'approved') {
     req.body.status = 'cancelled';
-  } else if (status === 'rejected') { // If admin rejects cancellation request, the leave status reverts to 'approved'
+  } else if (status === 'rejected') {
     req.body.status = 'approved';
   }
-  // Redirect to the main leave status update endpoint
   res.redirect(307, `/api/admin/leaves/${id}/status`);
 });
 
-app.get('*', (req, res, next) => {
-  try {
-
-    res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
-  } catch (err) {
-    console.error("💥 Error in wildcard fallback route:", err);
-    next(err);
-  }
-});
 
 // Error Handling Middleware
 app.use((err, req, res, next) => {
@@ -3427,8 +4052,6 @@ app.use((err, req, res, next) => {
   }
   res.status(500).json({ message: 'Internal server error.' });
 });
-
-
 
 // Start Server
 const PORT = process.env.PORT || 3001;
