@@ -75,7 +75,7 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(useragent.express());
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://127.0.0.1:5000', 'http://127.0.0.1:59584','https://attendance.unitedsolutionsplus.in'],
+  origin: ['https://attendance.unitedsolutionsplus.in'],
   credentials: true,
 }));
 
