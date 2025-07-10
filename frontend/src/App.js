@@ -1,11 +1,9 @@
-import React, { useState, useEffect } from 'react';
-// Assuming Axios is installed: npm install axios
-import axios from 'axios';
+// IMPORTANT: No Firebase imports or logic are included here.
+// Authentication relies solely on your backend's JWT and Axios.
 
-// Base URL for your backend API
-const API_BASE_URL = 'https://hrms-backend-rhsc.onrender.com';
+// React and ReactDOM are globally available via CDNs in index.html
+// axios, moment, and saveAs are also globally available.
 
-// Main App component
 const App = () => {
   // State variables for authentication, user data, dark mode, and messages
   const [user, setUser] = React.useState(null);
@@ -15,6 +13,9 @@ const App = () => {
   const [message, setMessage] = React.useState({ text: '', type: '' }); // { text: '...', type: 'success' | 'error' }
   const [accessToken, setAccessToken] = React.useState(null); // Store JWT access token
   const [loadingApp, setLoadingApp] = React.useState(true); // New loading state for the App component
+
+  // Base URL for your backend API
+  const API_BASE_URL = 'https://hrms-backend-rhsc.onrender.com'; // Adjust if your backend runs on a different port/domain
 
   // Function to set the access token in Axios headers for all subsequent requests
   const setAuthHeader = (token) => {
