@@ -26,6 +26,7 @@ function AdminPayrollManagement({
   const [newMedicalAllowance, setNewMedicalAllowance] = React.useState('');
   const [newSpecialAllowance, setNewSpecialAllowance] = React.useState('');
   const [newLTA, setNewLTA] = React.useState('');
+  const [newMediclaimDeductionAmount, setNewMediclaimDeductionAmount] = React.useState(''); // NEW: State for Mediclaim Deduction
   const [newEffectiveDate, setNewEffectiveDate] = React.useState(moment().format('YYYY-MM-DD'));
   const [newOtherEarnings, setNewOtherEarnings] = React.useState(''); // JSON string for other earnings
   // --- START: New States for Salary Structure Editing ---
@@ -146,6 +147,8 @@ function AdminPayrollManagement({
         medicalAllowance: parseFloat(newMedicalAllowance || 0),
         specialAllowance: parseFloat(newSpecialAllowance || 0),
         lta: parseFloat(newLTA || 0),
+        mediclaimDeductionAmount: parseFloat(newMediclaimDeductionAmount || 0),
+        // NEW: Include mediclaim deduction
         otherEarnings: otherEarningsJson,
         grossSalary: grossSalary
       });
@@ -171,6 +174,7 @@ function AdminPayrollManagement({
     setNewMedicalAllowance(structure.medical_allowance);
     setNewSpecialAllowance(structure.special_allowance);
     setNewLTA(structure.lta);
+    setNewMediclaimDeductionAmount(structure.mediclaim_deduction_amount || ''); // NEW: Populate mediclaim deduction
     setNewOtherEarnings(JSON.stringify(structure.other_earnings || {}, null, 2)); // Pretty print JSON
   };
   const handleCancelEditSalaryStructure = () => {
@@ -186,6 +190,7 @@ function AdminPayrollManagement({
     setNewMedicalAllowance('');
     setNewSpecialAllowance('');
     setNewLTA('');
+    setNewMediclaimDeductionAmount(''); // NEW: Clear mediclaim deduction
     setNewOtherEarnings('');
     setNewEffectiveDate(moment().format('YYYY-MM-DD'));
   };
@@ -512,6 +517,16 @@ function AdminPayrollManagement({
     value: newLTA,
     onChange: e => setNewLTA(e.target.value),
     className: "mt-1 block w-full px-3 py-2 border rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    htmlFor: "mediclaimDeductionAmount",
+    className: "block text-sm font-medium text-gray-700 dark:text-gray-300"
+  }, "Mediclaim Deduction Amount"), /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    id: "mediclaimDeductionAmount",
+    value: newMediclaimDeductionAmount,
+    onChange: e => setNewMediclaimDeductionAmount(e.target.value),
+    className: "mt-1 block w-full px-3 py-2 border rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white",
+    placeholder: "e.g., 420.00"
   })), /*#__PURE__*/React.createElement("div", {
     className: "md:col-span-2"
   }, /*#__PURE__*/React.createElement("label", {
@@ -613,7 +628,7 @@ function AdminPayrollManagement({
     className: "mt-2 font-bold"
   }, "Gross Earnings: \u20B9", previewCalculatedPayslip.gross_earnings)), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h6", {
     className: "font-medium text-red-600 dark:text-red-400"
-  }, "Deductions"), /*#__PURE__*/React.createElement("p", null, "EPF (Employee): \u20B9", previewCalculatedPayslip.epf_employee), /*#__PURE__*/React.createElement("p", null, "ESI (Employee): \u20B9", previewCalculatedPayslip.esi_employee), /*#__PURE__*/React.createElement("p", null, "Professional Tax: \u20B9", previewCalculatedPayslip.professional_tax), /*#__PURE__*/React.createElement("p", null, "TDS: \u20B9", previewCalculatedPayslip.tds), /*#__PURE__*/React.createElement("p", null, "Loan Deduction: \u20B9", previewCalculatedPayslip.loan_deduction), previewCalculatedPayslip.other_deductions && Object.keys(previewCalculatedPayslip.other_deductions).length > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("p", {
+  }, "Deductions"), /*#__PURE__*/React.createElement("p", null, "EPF (Employee): \u20B9", previewCalculatedPayslip.epf_employee), /*#__PURE__*/React.createElement("p", null, "ESI (Employee): \u20B9", previewCalculatedPayslip.esi_employee), /*#__PURE__*/React.createElement("p", null, "Professional Tax: \u20B9", previewCalculatedPayslip.professional_tax), /*#__PURE__*/React.createElement("p", null, "TDS: \u20B9", previewCalculatedPayslip.tds), /*#__PURE__*/React.createElement("p", null, "Loan Deduction: \u20B9", previewCalculatedPayslip.loan_deduction), previewCalculatedPayslip.mediclaim_deduction_amount !== undefined && /*#__PURE__*/React.createElement("p", null, "Mediclaim Deduction: \u20B9", previewCalculatedPayslip.mediclaim_deduction_amount), previewCalculatedPayslip.other_deductions && Object.keys(previewCalculatedPayslip.other_deductions).length > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("p", {
     className: "font-medium mt-2"
   }, "Other Deductions:"), Object.entries(previewCalculatedPayslip.other_deductions).map(([key, value]) => /*#__PURE__*/React.createElement("p", {
     key: key,
@@ -640,6 +655,8 @@ function AdminPayrollManagement({
     className: "px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"
   }, "HRA"), /*#__PURE__*/React.createElement("th", {
     className: "px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"
+  }, "Mediclaim Deduction"), " ", /*#__PURE__*/React.createElement("th", {
+    className: "px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"
   }, "Gross"), /*#__PURE__*/React.createElement("th", {
     className: "px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"
   }, "Other Earnings"), /*#__PURE__*/React.createElement("th", {
@@ -655,6 +672,8 @@ function AdminPayrollManagement({
   }, "\u20B9", structure.basic_salary), /*#__PURE__*/React.createElement("td", {
     className: "px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300"
   }, "\u20B9", structure.hra), /*#__PURE__*/React.createElement("td", {
+    className: "px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300"
+  }, "\u20B9", structure.mediclaim_deduction_amount || '0.00'), " ", /*#__PURE__*/React.createElement("td", {
     className: "px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300"
   }, "\u20B9", structure.gross_salary), /*#__PURE__*/React.createElement("td", {
     className: "px-6 py-4 text-sm text-gray-500 dark:text-gray-300"
@@ -759,7 +778,6 @@ function AdminPayrollManagement({
     className: `px-6 py-2 rounded-md transition-colors duration-200 ${uploadingPayslip ? 'bg-gray-400' : 'bg-blue-600 hover:bg-blue-700'} text-white`
   }, uploadingPayslip ? 'Uploading...' : 'Upload Payslip')));
 }
-;
 
 // Make the component globally accessible
 window.AdminPayrollManagement = AdminPayrollManagement;

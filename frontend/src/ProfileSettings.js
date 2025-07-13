@@ -1,7 +1,8 @@
 // ProfileSettings.js
 // REMOVE all local import/export statements when using type="text/babel" in index.html
 
-const ProfileSettings = ({ user, showMessage, apiBaseUrl, accessToken }) => { // Removed onUserUpdate prop
+const ProfileSettings = ({ user, showMessage, apiBaseUrl, accessToken }) => {
+    // Existing states
     const [name, setName] = React.useState(user?.name || '');
     const [email, setEmail] = React.useState(user?.email || '');
     const [employeeId, setEmployeeId] = React.useState(user?.employee_id || '');
@@ -14,6 +15,18 @@ const ProfileSettings = ({ user, showMessage, apiBaseUrl, accessToken }) => { //
     const [confirmNewPassword, setConfirmNewPassword] = React.useState('');
     const [photoFile, setPhotoFile] = React.useState(null);
 
+    // NEW STATES for additional profile fields
+    const [panCardNumber, setPanCardNumber] = React.useState(user?.pan_card_number || '');
+    const [bankAccountNumber, setBankAccountNumber] = React.useState(user?.bank_account_number || '');
+    const [ifscCode, setIfscCode] = React.useState(user?.ifsc_code || '');
+    const [bankName, setBankName] = React.useState(user?.bank_name || '');
+    // Ensure date_of_birth is formatted correctly for input type="date"
+    const [dateOfBirth, setDateOfBirth] = React.useState(user?.date_of_birth ? moment(user.date_of_birth).format('YYYY-MM-DD') : '');
+    const [personalDetails, setPersonalDetails] = React.useState(user?.personal_details || ''); // New state for personal details
+    const [familyHistory, setFamilyHistory] = React.useState(user?.family_history || ''); // New state for family history
+    const [profileUpdateReason, setProfileUpdateReason] = React.useState(''); // Reason for profile update request
+
+
     // Axios instance with token for authenticated requests
     const authAxios = axios.create({
         baseURL: apiBaseUrl,
@@ -25,37 +38,60 @@ const ProfileSettings = ({ user, showMessage, apiBaseUrl, accessToken }) => { //
     // Update state if user prop changes (e.g., after initial load or re-login)
     React.useEffect(() => {
         if (user) {
+            // These fields are now read-only, but we still initialize their states
+            // to display the current user data.
             setName(user.name || '');
             setEmail(user.email || '');
             setEmployeeId(user.employee_id || '');
+
             setAddress(user.address || '');
             setMobileNumber(user.mobile_number || '');
             setKycDetails(user.kyc_details || '');
             setProfilePhoto(user.profile_photo || null);
+            // Update new states from user prop
+            setPanCardNumber(user.pan_card_number || '');
+            setBankAccountNumber(user.bank_account_number || '');
+            setIfscCode(user.ifsc_code || '');
+            setBankName(user.bank_name || '');
+            setDateOfBirth(user.date_of_birth ? moment(user.date_of_birth).format('YYYY-MM-DD') : '');
+            setPersonalDetails(user.personal_details || ''); // Initialize new state
+            setFamilyHistory(user.family_history || '');     // Initialize new state
         }
     }, [user]);
 
-    const handleProfileUpdateRequest = async (e) => { // Renamed function
+    const handleProfileUpdateRequest = async (e) => {
         e.preventDefault();
+
+        if (!profileUpdateReason.trim()) {
+            showMessage('Please provide a reason for your profile update request.', 'error');
+            return;
+        }
+
         try {
             // Construct payload with proposed changes
+            // ONLY include fields that are meant for employee-initiated update requests (non-sensitive ones like name, email, employee_id are excluded)
             const requestedChanges = {
-                name: name,
-                email: email,
-                employee_id: employeeId,
                 address: address || null,
                 mobile_number: mobileNumber || null,
-                kyc_details: kycDetails || null
+                kyc_details: kycDetails || null,
+                pan_card_number: panCardNumber || null,
+                bank_account_number: bankAccountNumber || null,
+                ifsc_code: ifscCode || null,
+                bank_name: bankName || null,
+                date_of_birth: dateOfBirth || null,
+                personal_details: personalDetails || null, // Include new state
+                family_history: familyHistory || null,     // Include new state
             };
 
-            // Send request to a new backend endpoint for profile update approval
-            await authAxios.post(`${apiBaseUrl}/api/profile-update-requests`, {
-                requested_data: requestedChanges // Send all updated fields
+            // Send request to the backend endpoint for profile update approval
+            await authAxios.post(`${apiBaseUrl}/api/employee/profile-update-request`, {
+                requested_data: requestedChanges,
+                reason: profileUpdateReason // Include the reason
             });
 
             showMessage('Profile update request submitted for admin approval!', 'success');
-            // Clear photo file state after submission
-            setPhotoFile(null);
+            setProfileUpdateReason(''); // Clear the reason field after submission
+            setPhotoFile(null); // Clear the selected file after upload (if any)
 
             // Note: The user's profile on the frontend will NOT immediately reflect these changes
             // because they are pending admin approval. The 'user' prop will only update
@@ -100,16 +136,6 @@ const ProfileSettings = ({ user, showMessage, apiBaseUrl, accessToken }) => { //
     const handlePhotoChange = (e) => {
         if (e.target.files && e.target.files[0]) {
             setPhotoFile(e.target.files[0]);
-            // For now, photo upload is still direct. If photo also needs approval,
-            // it would need to be part of the requested_data JSONB in the backend.
-            // For simplicity, we'll assume photo updates are immediate or handled separately.
-            // If photo also needs approval, it would be a more complex change.
-            // For now, if a photo is selected, we could trigger an immediate upload or
-            // include its base64/URL in the requested_data. For this iteration,
-            // we'll keep photo upload as a separate, direct action for simplicity
-            // or assume it's handled by a different flow if approval is needed.
-            // For now, I'll remove the direct photo upload from here to align with approval flow.
-            // If photo changes also need approval, they should be part of the requested_data.
         }
     };
 
@@ -139,7 +165,7 @@ const ProfileSettings = ({ user, showMessage, apiBaseUrl, accessToken }) => { //
     return (
         <div className="mt-8 p-4 border border-gray-200 dark:border-gray-700 rounded-md bg-gray-50 dark:bg-gray-700">
             <h4 className="text-lg font-medium mb-4">Update Your Profile</h4>
-            <form onSubmit={handleProfileUpdateRequest} className="space-y-4"> {/* Changed onSubmit handler */}
+            <form onSubmit={handleProfileUpdateRequest} className="space-y-4">
                 <div className="flex items-center space-x-4">
                     {profilePhoto ? (
                         <img src={profilePhoto} alt="Profile" className="w-24 h-24 rounded-full object-cover border-2 border-blue-500" />
@@ -172,18 +198,21 @@ const ProfileSettings = ({ user, showMessage, apiBaseUrl, accessToken }) => { //
                     </div>
                 </div>
 
+                {/* Read-only Profile Fields (Name, Email, Employee ID) */}
                 <div>
                     <label htmlFor="name" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Name</label>
-                    <input type="text" id="name" className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" value={name} onChange={(e) => setName(e.target.value)} required />
+                    <input type="text" id="name" className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white sm:text-sm" value={name} readOnly />
                 </div>
                 <div>
                     <label htmlFor="email" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Email</label>
-                    <input type="email" id="email" className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                    <input type="email" id="email" className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white sm:text-sm" value={email} readOnly />
                 </div>
                 <div>
                     <label htmlFor="employeeId" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Employee ID</label>
-                    <input type="text" id="employeeId" className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} required />
+                    <input type="text" id="employeeId" className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white sm:text-sm" value={employeeId} readOnly />
                 </div>
+
+                {/* Editable Profile Fields for Update Request */}
                 <div>
                     <label htmlFor="address" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Address</label>
                     <textarea id="address" rows="2" className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" value={address} onChange={(e) => setAddress(e.target.value)}></textarea>
@@ -196,6 +225,42 @@ const ProfileSettings = ({ user, showMessage, apiBaseUrl, accessToken }) => { //
                     <label htmlFor="kycDetails" className="block text-sm font-medium text-gray-700 dark:text-gray-300">KYC Details</label>
                     <textarea id="kycDetails" rows="2" className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" value={kycDetails} onChange={(e) => setKycDetails(e.target.value)}></textarea>
                 </div>
+
+                {/* NEW PROFILE FIELDS FOR EMPLOYEE TO REQUEST UPDATE */}
+                <div>
+                    <label htmlFor="panCardNumber" className="block text-sm font-medium text-gray-700 dark:text-gray-300">PAN Card Number</label>
+                    <input type="text" id="panCardNumber" className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" value={panCardNumber} onChange={(e) => setPanCardNumber(e.target.value)} />
+                </div>
+                <div>
+                    <label htmlFor="bankAccountNumber" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Bank Account Number</label>
+                    <input type="text" id="bankAccountNumber" className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" value={bankAccountNumber} onChange={(e) => setBankAccountNumber(e.target.value)} />
+                </div>
+                <div>
+                    <label htmlFor="ifscCode" className="block text-sm font-medium text-gray-700 dark:text-gray-300">IFSC Code</label>
+                    <input type="text" id="ifscCode" className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" value={ifscCode} onChange={(e) => setIfscCode(e.target.value)} />
+                </div>
+                <div>
+                    <label htmlFor="bankName" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Bank Name</label>
+                    <input type="text" id="bankName" className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" value={bankName} onChange={(e) => setBankName(e.target.value)} />
+                </div>
+                <div>
+                    <label htmlFor="dateOfBirth" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Date of Birth</label>
+                    <input type="date" id="dateOfBirth" className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} />
+                </div>
+                <div>
+                    <label htmlFor="personalDetails" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Personal Details</label>
+                    <textarea id="personalDetails" rows="2" className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" value={personalDetails} onChange={(e) => setPersonalDetails(e.target.value)}></textarea>
+                </div>
+                <div>
+                    <label htmlFor="familyHistory" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Family History</label>
+                    <textarea id="familyHistory" rows="2" className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" value={familyHistory} onChange={(e) => setFamilyHistory(e.target.value)}></textarea>
+                </div>
+
+                <div>
+                    <label htmlFor="profileUpdateReason" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Reason for Update Request</label>
+                    <textarea id="profileUpdateReason" rows="3" className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" value={profileUpdateReason} onChange={(e) => setProfileUpdateReason(e.target.value)} required></textarea>
+                </div>
+
                 <button type="submit" className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200 shadow-md">
                     Submit Profile Changes for Approval
                 </button>
@@ -223,3 +288,5 @@ const ProfileSettings = ({ user, showMessage, apiBaseUrl, accessToken }) => { //
     );
 };
 
+// Make the component globally accessible
+window.ProfileSettings = ProfileSettings;

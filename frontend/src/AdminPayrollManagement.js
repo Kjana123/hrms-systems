@@ -19,6 +19,7 @@ function AdminPayrollManagement({ showMessage, apiBaseUrl, accessToken, authAxio
     const [newMedicalAllowance, setNewMedicalAllowance] = React.useState('');
     const [newSpecialAllowance, setNewSpecialAllowance] = React.useState('');
     const [newLTA, setNewLTA] = React.useState('');
+    const [newMediclaimDeductionAmount, setNewMediclaimDeductionAmount] = React.useState(''); // NEW: State for Mediclaim Deduction
     const [newEffectiveDate, setNewEffectiveDate] = React.useState(moment().format('YYYY-MM-DD'));
     const [newOtherEarnings, setNewOtherEarnings] = React.useState(''); // JSON string for other earnings
     // --- START: New States for Salary Structure Editing ---
@@ -145,6 +146,7 @@ function AdminPayrollManagement({ showMessage, apiBaseUrl, accessToken, authAxio
                 medicalAllowance: parseFloat(newMedicalAllowance || 0),
                 specialAllowance: parseFloat(newSpecialAllowance || 0),
                 lta: parseFloat(newLTA || 0),
+                mediclaimDeductionAmount: parseFloat(newMediclaimDeductionAmount || 0), // NEW: Include mediclaim deduction
                 otherEarnings: otherEarningsJson,
                 grossSalary: grossSalary
             });
@@ -170,6 +172,7 @@ function AdminPayrollManagement({ showMessage, apiBaseUrl, accessToken, authAxio
         setNewMedicalAllowance(structure.medical_allowance);
         setNewSpecialAllowance(structure.special_allowance);
         setNewLTA(structure.lta);
+        setNewMediclaimDeductionAmount(structure.mediclaim_deduction_amount || ''); // NEW: Populate mediclaim deduction
         setNewOtherEarnings(JSON.stringify(structure.other_earnings || {}, null, 2)); // Pretty print JSON
     };
 
@@ -187,6 +190,7 @@ function AdminPayrollManagement({ showMessage, apiBaseUrl, accessToken, authAxio
         setNewMedicalAllowance('');
         setNewSpecialAllowance('');
         setNewLTA('');
+        setNewMediclaimDeductionAmount(''); // NEW: Clear mediclaim deduction
         setNewOtherEarnings('');
         setNewEffectiveDate(moment().format('YYYY-MM-DD'));
     };
@@ -484,6 +488,13 @@ function AdminPayrollManagement({ showMessage, apiBaseUrl, accessToken, authAxio
                             <input type="number" id="lta" value={newLTA} onChange={(e) => setNewLTA(e.target.value)}
                                 className="mt-1 block w-full px-3 py-2 border rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
                         </div>
+                        {/* NEW: Mediclaim Deduction Amount Input */}
+                        <div>
+                            <label htmlFor="mediclaimDeductionAmount" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Mediclaim Deduction Amount</label>
+                            <input type="number" id="mediclaimDeductionAmount" value={newMediclaimDeductionAmount} onChange={(e) => setNewMediclaimDeductionAmount(e.target.value)}
+                                className="mt-1 block w-full px-3 py-2 border rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                placeholder="e.g., 420.00" />
+                        </div>
                         <div className="md:col-span-2">
                             <label htmlFor="otherEarnings" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Other Earnings (JSON)</label>
                             <textarea id="otherEarnings" value={newOtherEarnings} onChange={(e) => setNewOtherEarnings(e.target.value)} rows="2"
@@ -590,6 +601,10 @@ function AdminPayrollManagement({ showMessage, apiBaseUrl, accessToken, authAxio
                                     <p>Professional Tax: ₹{previewCalculatedPayslip.professional_tax}</p>
                                     <p>TDS: ₹{previewCalculatedPayslip.tds}</p>
                                     <p>Loan Deduction: ₹{previewCalculatedPayslip.loan_deduction}</p>
+                                    {/* NEW: Display Mediclaim Deduction in Preview */}
+                                    {previewCalculatedPayslip.mediclaim_deduction_amount !== undefined && (
+                                        <p>Mediclaim Deduction: ₹{previewCalculatedPayslip.mediclaim_deduction_amount}</p>
+                                    )}
                                     {previewCalculatedPayslip.other_deductions && Object.keys(previewCalculatedPayslip.other_deductions).length > 0 && (
                                         <>
                                             <p className="font-medium mt-2">Other Deductions:</p>
@@ -617,6 +632,7 @@ function AdminPayrollManagement({ showMessage, apiBaseUrl, accessToken, authAxio
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Effective Date</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Basic</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">HRA</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Mediclaim Deduction</th> {/* NEW: Table Header */}
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Gross</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Other Earnings</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Actions</th> {/* Added Actions column */}
@@ -628,6 +644,7 @@ function AdminPayrollManagement({ showMessage, apiBaseUrl, accessToken, authAxio
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{structure.effective_date}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">₹{structure.basic_salary}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">₹{structure.hra}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">₹{structure.mediclaim_deduction_amount || '0.00'}</td> {/* NEW: Display Mediclaim Deduction */}
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">₹{structure.gross_salary}</td>
                                             <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-300">{JSON.stringify(structure.other_earnings)}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">

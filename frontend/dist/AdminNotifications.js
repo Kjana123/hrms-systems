@@ -55,7 +55,8 @@ const AdminNotifications = ({
       message: notificationMessage
     };
     if (notificationType === 'global') {
-      endpoint = `${apiBaseUrl}/api/admin/notifications/global`;
+      // CORRECTED: Removed '/api' prefix from the global notification endpoint
+      endpoint = `${apiBaseUrl}/admin/notifications/global`;
     } else {
       // 'specific'
       if (!selectedEmployeeId) {
@@ -63,7 +64,6 @@ const AdminNotifications = ({
         return;
       }
       endpoint = `${apiBaseUrl}/api/admin/notifications/send`;
-      // CHANGE THIS LINE:
       payload.userId = selectedEmployeeId; // Changed from user_id to userId to match backend
     }
     setSendingNotification(true);

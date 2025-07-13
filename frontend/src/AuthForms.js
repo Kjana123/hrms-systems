@@ -19,10 +19,20 @@ const AuthForms = ({ handleLogin, darkMode, toggleDarkMode, showMessage, apiBase
     };
 
     return (
-        <div className={`min-h-screen flex items-center justify-center w-full p-4
+        <div className={`min-h-screen flex items-center justify-center w-full p-4 relative // 'relative' is still useful for context, but logos will be 'fixed'
             ${darkMode ? 'bg-gray-900' : 'bg-gradient-to-br from-blue-50 to-indigo-100'} // Lighter background gradient
+            bg-cover bg-center bg-no-repeat // Keep these Tailwind classes for background behavior
+            bg-blue-100 // Fallback solid background color
             transition-all duration-500 transform`}
+            style={{ backgroundImage: `url('/assets/images/beyond-bim-5.png')` }} // Direct inline style for background image
         >
+            {/* Company Logo (Top-Left Corner) - Positioned as FIXED */}
+            <img
+                src="/assets/images/company-logo.jpeg" // Placeholder for Company Logo
+                alt="Company Logo"
+                className="fixed top-4 left-4 w-24 h-auto rounded-md shadow-lg z-50" // Changed to 'fixed', added z-index
+            />
+
             <div className={`bg-white dark:bg-gray-800 p-8 sm:p-10 rounded-xl shadow-2xl w-full max-w-md transition-all duration-500 transform ${darkMode ? 'text-white' : 'text-gray-800'} hover:scale-[1.01]`}>
                 <div className="flex justify-end mb-4">
                     {/* Dark Mode Toggle */}
@@ -42,6 +52,13 @@ const AuthForms = ({ handleLogin, darkMode, toggleDarkMode, showMessage, apiBase
                         )}
                     </button>
                 </div>
+
+                {/* Beyond BIM Technologies Heading - ADDED COLORING */}
+                <h2 className="text-2xl sm:text-3xl font-extrabold text-center mb-2
+                    bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-purple-700 // ADDED GRADIENT
+                    ">
+                    Beyond BIM Technologies
+                </h2>
 
                 <h2 className="text-4xl font-extrabold text-center mb-8 text-blue-600 dark:text-blue-400">
                     Welcome Back!
@@ -107,6 +124,13 @@ const AuthForms = ({ handleLogin, darkMode, toggleDarkMode, showMessage, apiBase
                     </button>
                 </div>
             </div>
+
+            {/* Developer Logo (Bottom-Right Corner) - Positioned as FIXED */}
+            <img
+                src="/assets/images/united-solutions-plus.jpeg" // Placeholder for Developer Logo
+                alt="Developer Logo"
+                className="fixed bottom-4 right-4 w-20 h-auto rounded-md shadow-lg z-50" // Changed to 'fixed', added z-index
+            />
 
             {/* Forgot Password Modal */}
             {showForgotPasswordModal && (

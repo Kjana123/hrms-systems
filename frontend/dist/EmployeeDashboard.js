@@ -20,11 +20,12 @@ const EmployeeDashboard = ({
   toggleDarkMode,
   showMessage,
   apiBaseUrl,
-  accessToken
+  accessToken,
+  onProfileUpdateSuccess
 }) => {
   // State for overall loading and active tab
   const [loading, setLoading] = React.useState(true); // Overall loading for the dashboard
-  const [activeTab, setActiveTab] = React.useState('dashboard'); // 'dashboard', 'apply-leave', 'my-leaves', 'correction', 'profile', 'notifications', 'leave-balances' 'payslips'
+  const [activeTab, setActiveTab] = React.useState('dashboard'); // 'dashboard', 'apply-leave', 'my-leaves', 'correction', 'profile', 'notifications', 'leave-balances' 'payslips', 'view-profile'
 
   // State for attendance data
   const [attendanceToday, setAttendanceToday] = React.useState(null);
@@ -41,21 +42,30 @@ const EmployeeDashboard = ({
   // State for notifications
   const [unreadNotificationsCount, setUnreadNotificationsCount] = React.useState(0); // New state for unread notifications
   const [allNotifications, setAllNotifications] = React.useState([]); // New state to hold all notifications
+  const [correctionRequests, setCorrectionRequests] = React.useState([]);
 
   // State for leave balances
   const [leaveBalances, setLeaveBalances] = React.useState([]); // New state for leave balances
 
+  // NEW: Ref to track if profile has been fetched for the current session/login
+  const profileFetchedRef = React.useRef(false);
+
+  // NEW: State for birthdays this month
+  const [birthdaysThisMonth, setBirthdaysThisMonth] = React.useState([]);
+
   // Axios instance with token for authenticated requests
   // Assumes 'axios' is globally available
-  const authAxios = axios.create({
-    baseURL: apiBaseUrl,
-    headers: {
-      Authorization: `Bearer ${accessToken}`
-    }
-  });
+  const authAxios = React.useMemo(() => {
+    return axios.create({
+      baseURL: apiBaseUrl,
+      headers: {
+        Authorization: `Bearer ${accessToken}`
+      }
+    });
+  }, [apiBaseUrl, accessToken]); // Recreate only if apiBaseUrl or accessToken changes
 
   // Function to fetch today's attendance
-  const fetchAttendanceToday = async () => {
+  const fetchAttendanceToday = React.useCallback(async () => {
     setLoadingAttendanceToday(true);
     try {
       // Use moment() without arguments, which will now default to IST due to setDefault
@@ -85,10 +95,10 @@ const EmployeeDashboard = ({
     } finally {
       setLoadingAttendanceToday(false);
     }
-  };
+  }, [accessToken, apiBaseUrl, authAxios, showMessage]); // Added accessToken, apiBaseUrl, authAxios, showMessage to dependencies
 
   // Function to fetch monthly attendance history
-  const fetchAttendanceHistory = async () => {
+  const fetchAttendanceHistory = React.useCallback(async () => {
     setLoadingAttendanceHistory(true);
     try {
       console.log(`[FETCH DEBUG] fetchAttendanceHistory: Requesting history for month: ${selectedMonth}, year: ${selectedYear}`);
@@ -121,10 +131,10 @@ const EmployeeDashboard = ({
     } finally {
       setLoadingAttendanceHistory(false);
     }
-  };
+  }, [accessToken, selectedMonth, selectedYear, apiBaseUrl, authAxios, showMessage]); // Added accessToken, apiBaseUrl, authAxios, showMessage to dependencies
 
   // Function to fetch monthly analytics
-  const fetchMonthlyAnalytics = async () => {
+  const fetchMonthlyAnalytics = React.useCallback(async () => {
     setLoadingAnalyticsData(true); // Set loading true before fetching
     try {
       console.log(`[FETCH DEBUG] fetchMonthlyAnalytics: Requesting analytics for month: ${selectedMonth}, year: ${selectedYear}`);
@@ -145,10 +155,11 @@ const EmployeeDashboard = ({
     } finally {
       setLoadingAnalyticsData(false); // Set loading false after fetch completes (success or error)
     }
-  };
+  }, [accessToken, selectedMonth, selectedYear, apiBaseUrl, authAxios, showMessage]); // Added accessToken, apiBaseUrl, authAxios, showMessage to dependencies
 
   // Function to fetch unread notifications count
-  const fetchAllNotificationsAndCount = async () => {
+  const fetchAllNotificationsAndCount = React.useCallback(async () => {
+    if (!accessToken) return; // Ensure token is available
     try {
       // Fetch ALL notifications for the user
       const response = await authAxios.get(`${apiBaseUrl}/api/notifications/my`);
@@ -161,21 +172,97 @@ const EmployeeDashboard = ({
       setAllNotifications([]); // Clear on error
       setUnreadNotificationsCount(0); // Set count to 0 on error
     }
-  };
+  }, [accessToken, apiBaseUrl, authAxios, showMessage]); // Added accessToken, apiBaseUrl, authAxios, showMessage to dependencies
 
   // Function to fetch leave balances
-  const fetchLeaveBalances = async () => {
+  const fetchLeaveBalances = React.useCallback(async () => {
+    if (!accessToken || !user?.id) return; // Ensure user and token are available
     try {
-      const response = await authAxAxios.get(`${apiBaseUrl}/api/leaves/my-balances`);
+      const response = await authAxios.get(`${apiBaseUrl}/api/leaves/my-balances`);
       setLeaveBalances(response.data);
     } catch (error) {
       console.error("Error fetching leave balances:", error.response?.data?.message || error.message);
       setLeaveBalances([]);
     }
-  };
+  }, [accessToken, user?.id, apiBaseUrl, authAxios, showMessage]); // Added accessToken, user?.id, apiBaseUrl, authAxios, showMessage to dependencies
 
-  // Initial fetch for all dashboard data
-  // This useEffect runs on component mount and when user/accessToken change
+  // Function to fetch leave applications
+  const fetchLeaveApplications = React.useCallback(async () => {
+    if (!accessToken || !user?.id) return; // Ensure user and token are available
+    try {
+      setLoading(true);
+      const response = await authAxios.get(`${apiBaseUrl}/api/leaves/my`);
+      setLeaveApplications(response.data);
+      console.log("Leave Applications fetched:", response.data);
+    } catch (error) {
+      console.error("Error fetching leave applications:", error.response?.data?.message || error.message);
+      showMessage(`Error fetching leave applications: ${error.response?.data?.message || error.message}`, "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [accessToken, user?.id, apiBaseUrl, authAxios, showMessage]); // Added accessToken, user?.id, apiBaseUrl, authAxios, showMessage to dependencies
+
+  // Function to fetch leave types (for the form)
+  const fetchLeaveTypes = React.useCallback(async () => {
+    if (!accessToken) return; // Ensure token is available
+    try {
+      const response = await authAxios.get(`${apiBaseUrl}/api/admin/leave-types`); // Assuming this is an admin endpoint but used by employee for types
+      setLeaveTypes(response.data);
+      console.log("Leave Types fetched:", response.data);
+    } catch (error) {
+      console.error("Error fetching leave types:", error.response?.data?.message || error.message);
+      showMessage(`Error fetching leave types: ${error.response?.data?.message || error.message}`, "error");
+    }
+  }, [accessToken, apiBaseUrl, authAxios, showMessage]); // Added accessToken, apiBaseUrl, authAxios, showMessage to dependencies
+
+  // Function to fetch correction requests
+  const fetchCorrectionRequests = React.useCallback(async () => {
+    if (!accessToken || !user?.id) return; // Ensure user and token are available
+    try {
+      // MODIFIED: Changed endpoint to match backend's /api/corrections
+      const response = await authAxios.get(`${apiBaseUrl}/api/corrections`);
+      setCorrectionRequests(response.data);
+      console.log("Correction Requests fetched:", response.data);
+    } catch (error) {
+      console.error("Error fetching correction requests:", error.response?.data?.message || error.message);
+      showMessage(`Error fetching correction requests: ${error.response?.data?.message || error.message}`, "error");
+    }
+  }, [accessToken, user?.id, apiBaseUrl, authAxios, showMessage]); // Added accessToken, user?.id, apiBaseUrl, authAxios, showMessage to dependencies
+
+  // NEW: Function to fetch birthdays for the current month
+  const fetchBirthdaysThisMonth = React.useCallback(async () => {
+    if (!accessToken) return;
+    try {
+      const response = await authAxios.get(`${apiBaseUrl}/api/birthdays/this-month`);
+      setBirthdaysThisMonth(response.data);
+      console.log("Birthdays this month fetched:", response.data);
+    } catch (error) {
+      console.error("Error fetching birthdays this month:", error.response?.data?.message || error.message);
+      showMessage(`Error fetching birthdays: ${error.response?.data?.message || error.message}`, "error");
+    }
+  }, [accessToken, apiBaseUrl, authAxios, showMessage]);
+
+  // NEW: Function to check and potentially send a birthday wish notification
+  const checkAndSendBirthdayWish = React.useCallback(async () => {
+    if (!accessToken || !user?.id || !user?.date_of_birth) return;
+    const today = moment().format('MM-DD');
+    const userBirthday = moment(user.date_of_birth).format('MM-DD');
+    if (today === userBirthday) {
+      console.log(`[BIRTHDAY_CHECK] It's ${user.name}'s birthday today! Checking for wish notification.`);
+      try {
+        // Call backend endpoint to check and send notification
+        await authAxios.post(`${apiBaseUrl}/api/notifications/check-birthday-wish`);
+        console.log("[BIRTHDAY_CHECK] Birthday wish check sent to backend.");
+        // After checking/sending, re-fetch notifications to update count/list
+        fetchAllNotificationsAndCount();
+      } catch (error) {
+        console.error("Error checking/sending birthday wish:", error.response?.data?.message || error.message);
+        showMessage(`Failed to check/send birthday wish: ${error.response?.data?.message || error.message}`, "error");
+      }
+    }
+  }, [accessToken, user, apiBaseUrl, authAxios, showMessage, fetchAllNotificationsAndCount]);
+
+  // Initial fetch for all dashboard data (runs on component mount and when user/accessToken change)
   React.useEffect(() => {
     const initialFetch = async () => {
       if (!user?.id || !accessToken) {
@@ -186,7 +273,10 @@ const EmployeeDashboard = ({
       console.log(`[EFFECT DEBUG] useEffect: Initial data fetch triggered.`);
       try {
         // Fetch all data concurrently
-        await Promise.all([fetchAttendanceToday(), fetchAllNotificationsAndCount(), fetchLeaveBalances()]);
+        await Promise.all([fetchAttendanceToday(), fetchAllNotificationsAndCount(), fetchLeaveBalances(), fetchBirthdaysThisMonth(),
+        // NEW: Fetch birthdays on initial load
+        checkAndSendBirthdayWish() // NEW: Check and send birthday wish
+        ]);
       } catch (error) {
         console.error(`[EFFECT ERROR] Initial dashboard data fetch failed:`, error);
       } finally {
@@ -194,17 +284,63 @@ const EmployeeDashboard = ({
       }
     };
     initialFetch();
-  }, [user, accessToken, apiBaseUrl]); // Removed selectedMonth, selectedYear, activeTab from here
+  }, [user, accessToken, fetchAttendanceToday, fetchAllNotificationsAndCount, fetchLeaveBalances, fetchBirthdaysThisMonth, checkAndSendBirthdayWish]);
 
-  // Separate useEffect for monthly data (analytics and history)
-  // This runs when selectedMonth or selectedYear changes, or when activeTab becomes 'dashboard'
+  // Main useEffect to handle data fetching based on activeTab and other dependencies
   React.useEffect(() => {
-    if (activeTab === 'dashboard' && user?.id && accessToken) {
-      console.log(`[EFFECT DEBUG] useEffect: Monthly data fetch triggered for month: ${selectedMonth}, year: ${selectedYear}`);
+    // Ensure onProfileUpdateSuccess is available (passed from App.js)
+    if (!onProfileUpdateSuccess) {
+      console.warn("onProfileUpdateSuccess prop is missing in EmployeeDashboard.");
+      return;
+    }
+
+    // --- START OF FIX FOR CONTINUOUS REFRESH ---
+    // Only trigger profile fetch when the tab *becomes* 'profile' or 'view-profile'
+    // and accessToken is available, AND it hasn't been fetched yet in this session.
+    if (activeTab === 'profile' || activeTab === 'view-profile') {
+      if (accessToken && !profileFetchedRef.current) {
+        console.log(`[EMPLOYEE_DASHBOARD_DEBUG] Initial fetch of user profile for tab: ${activeTab}`);
+        onProfileUpdateSuccess(accessToken); // This updates 'user' in App.js
+        profileFetchedRef.current = true; // Mark as fetched for this session
+      } else if (!accessToken) {
+        // If accessToken becomes null while on profile tab (e.g., after logout), reset the ref
+        profileFetchedRef.current = false;
+      }
+    } else {
+      // When switching away from the profile tab, reset the ref if accessToken is null (e.g., after logout)
+      // This prepares it for a fresh fetch if the user logs in again and goes to profile.
+      if (!accessToken) {
+        profileFetchedRef.current = false;
+      }
+      // Also reset the flag if we switch to another tab and we have an accessToken.
+      // This allows a re-fetch if we return to the profile tab later in the same session.
+      // However, be careful with this, it might cause re-fetches if not desired.
+      // For now, let's keep it simple and only reset on logout.
+      // If you want to force re-fetch every time you visit the profile tab,
+      // you'd remove the `!profileFetchedRef.current` condition and manage loading states carefully.
+    }
+    // --- END OF FIX FOR CONTINUOUS REFRESH ---
+
+    // Other tab-specific fetches (these should ideally be wrapped in useCallback too if they depend on props/state)
+    if (activeTab === 'dashboard') {
+      console.log(`[EMPLOYEE_DASHBOARD_DEBUG] Monthly data fetch triggered for month: ${selectedMonth}, year: ${selectedYear}`);
       fetchMonthlyAnalytics();
       fetchAttendanceHistory();
+      fetchBirthdaysThisMonth(); // Ensure birthdays are also fetched when returning to dashboard
+    } else if (activeTab === 'attendance') {
+      fetchAttendanceHistory();
+    } else if (activeTab === 'leaves') {
+      fetchLeaveApplications();
+      fetchLeaveTypes();
+      fetchLeaveBalances();
+    } else if (activeTab === 'notifications') {
+      fetchAllNotificationsAndCount();
+    } else if (activeTab === 'correction') {
+      // Note: Your sidebar uses 'correction', not 'correction-requests'
+      fetchCorrectionRequests();
     }
-  }, [selectedMonth, selectedYear, activeTab, user, accessToken, apiBaseUrl]);
+    // No explicit fetch needed for 'payslips' as EmployeePayslips component handles its own fetch
+  }, [activeTab, accessToken, onProfileUpdateSuccess, selectedMonth, selectedYear, fetchMonthlyAnalytics, fetchAttendanceHistory, fetchLeaveApplications, fetchLeaveTypes, fetchLeaveBalances, fetchAllNotificationsAndCount, fetchCorrectionRequests, fetchBirthdaysThisMonth]);
 
   // Derived state for check-in/out buttons based on attendanceToday
   // CORRECTED: Parse check_in/out without format string for correct UTC ISO parsing
@@ -213,7 +349,7 @@ const EmployeeDashboard = ({
   const canCheckOut = hasCheckedInToday && (!attendanceToday.check_out || typeof attendanceToday.check_out === 'string' && !moment(attendanceToday.check_out).isValid()); // Removed 'HH:mm:ss' format hint
 
   // Handle check-in
-  const handleCheckIn = async () => {
+  const handleCheckIn = React.useCallback(async () => {
     if (!user?.id) {
       showMessage('User not authenticated.', 'error');
       return;
@@ -247,10 +383,10 @@ const EmployeeDashboard = ({
       showMessage(error.response?.data?.message || 'Check-in failed.', 'error');
       await fetchAttendanceToday(); // Re-fetch to revert if optimistic update was wrong or for error state
     }
-  };
+  }, [user, apiBaseUrl, authAxios, showMessage, fetchAttendanceToday, fetchAttendanceHistory, fetchMonthlyAnalytics]);
 
   // Handle check-out
-  const handleCheckOut = async () => {
+  const handleCheckOut = React.useCallback(async () => {
     if (!user?.id) {
       showMessage('User not authenticated.', 'error');
       return;
@@ -283,10 +419,10 @@ const EmployeeDashboard = ({
       showMessage(error.response?.data?.message || 'Check-out failed.', 'error');
       await fetchAttendanceToday(); // Re-fetch to revert if optimistic update was wrong or for error state
     }
-  };
+  }, [user, apiBaseUrl, authAxios, showMessage, fetchAttendanceToday, fetchAttendanceHistory, fetchMonthlyAnalytics]);
 
   // Handle leave application submission
-  const handleLeaveApplication = async leaveData => {
+  const handleLeaveApplication = React.useCallback(async leaveData => {
     try {
       await authAxios.post(`${apiBaseUrl}/api/leaves/apply`, leaveData);
       showMessage('Leave application submitted successfully!', 'success');
@@ -298,12 +434,12 @@ const EmployeeDashboard = ({
       await fetchMonthlyAnalytics(); // Leave application affects analytics
     } catch (error) {
       console.error("Error applying for leave:", error.response?.data?.message || error.message);
-      showMessage(`Failed to submit leave application: ${error.response?.data?.message || error.message}`, 'error');
+      showMessage(`Failed to submit leave application: ${error.response?.data?.message || error.message}`, "error");
     }
-  };
+  }, [apiBaseUrl, authAxios, showMessage, fetchAttendanceToday, fetchAllNotificationsAndCount, fetchLeaveBalances, fetchMonthlyAnalytics]);
 
   // Handle leave cancellation request
-  const handleLeaveCancellationRequest = async applicationId => {
+  const handleLeaveCancellationRequest = React.useCallback(async applicationId => {
     // IMPORTANT: Use a custom modal or component for confirmation, not window.confirm
     // For now, keeping window.confirm as per previous code, but note the instruction.
     if (!window.confirm('Are you sure you want to request cancellation for this leave?')) {
@@ -319,12 +455,12 @@ const EmployeeDashboard = ({
       await fetchMonthlyAnalytics(); // Leave cancellation affects analytics
     } catch (error) {
       console.error("Error requesting cancellation:", error.response?.data?.message || error.message);
-      showMessage(`Failed to request cancellation: ${error.response?.data?.message || error.message}`, 'error');
+      showMessage(`Failed to request cancellation: ${error.response?.data?.message || error.message}`, "error");
     }
-  };
+  }, [apiBaseUrl, authAxios, showMessage, fetchAttendanceToday, fetchAllNotificationsAndCount, fetchLeaveBalances, fetchMonthlyAnalytics]);
 
   // Handle attendance correction request
-  const handleCorrectionRequest = async correctionData => {
+  const handleCorrectionRequest = React.useCallback(async correctionData => {
     try {
       await authAxios.post(`${apiBaseUrl}/api/attendance/correction-request`, correctionData);
       showMessage('Attendance correction request submitted!', 'success');
@@ -336,9 +472,9 @@ const EmployeeDashboard = ({
       setActiveTab('dashboard'); // Go back to dashboard to see updated attendance
     } catch (error) {
       console.error("Error submitting correction:", error.response?.data?.message || error.message);
-      showMessage(`Failed to submit correction: ${error.response?.data?.message || error.message}`, 'error');
+      showMessage(`Failed to submit correction: ${error.response?.data?.message || error.message}`, "error");
     }
-  };
+  }, [apiBaseUrl, authAxios, showMessage, fetchAttendanceHistory, fetchAttendanceToday, fetchAllNotificationsAndCount, fetchMonthlyAnalytics]);
 
   // Generate month and year options for dropdowns
   const monthOptions = moment.months().map((monthName, index) => ({
@@ -378,6 +514,14 @@ const EmployeeDashboard = ({
         return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300';
     }
   };
+
+  // Check if today is the logged-in user's birthday
+  const isMyBirthdayToday = React.useMemo(() => {
+    if (!user?.date_of_birth) return false;
+    const today = moment().format('MM-DD');
+    const userBirthday = moment(user.date_of_birth).format('MM-DD');
+    return today === userBirthday;
+  }, [user?.date_of_birth]);
 
   // Render loading state while data is being fetched
   if (loading) {
@@ -458,6 +602,10 @@ const EmployeeDashboard = ({
   }, "Notifications", unreadNotificationsCount > 0 && /*#__PURE__*/React.createElement("span", {
     className: "ml-2 inline-flex items-center justify-center px-2 py-0.5 text-xs font-bold leading-none text-red-100 bg-red-600 rounded-full"
   }, unreadNotificationsCount)), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setActiveTab('view-profile') // New tab for viewing profile
+    ,
+    className: `w-full text-left py-2 px-4 rounded-md font-medium transition-colors duration-200 ${activeTab === 'view-profile' ? darkMode ? 'bg-purple-600 text-white shadow-md' : 'bg-indigo-600 text-white shadow-md' : darkMode ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-200'}`
+  }, "View My Profile"), /*#__PURE__*/React.createElement("button", {
     onClick: () => setActiveTab('profile'),
     className: `w-full text-left py-2 px-4 rounded-md font-medium transition-colors duration-200 ${activeTab === 'profile' ? darkMode ? 'bg-purple-600 text-white shadow-md' : 'bg-indigo-600 text-white shadow-md' : darkMode ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-200'}`
   }, "Profile Settings"), /*#__PURE__*/React.createElement("button", {
@@ -474,7 +622,22 @@ const EmployeeDashboard = ({
     className: `text-4xl font-extrabold mb-8 ${darkMode ? 'text-white' : 'text-gray-900'}`
   }, "Welcome, ", /*#__PURE__*/React.createElement("span", {
     className: `${darkMode ? 'text-purple-400' : 'text-indigo-600'}`
-  }, user?.name || 'Employee', "!")), activeTab === 'dashboard' && /*#__PURE__*/React.createElement("section", {
+  }, user?.name || 'Employee', "!")), isMyBirthdayToday && /*#__PURE__*/React.createElement("div", {
+    className: "bg-yellow-100 dark:bg-yellow-900 p-4 rounded-lg shadow-md flex items-center justify-center mb-8 transition-colors duration-300"
+  }, /*#__PURE__*/React.createElement("svg", {
+    xmlns: "http://www.w3.org/2000/svg",
+    className: "h-8 w-8 text-yellow-600 dark:text-yellow-300 mr-3",
+    fill: "none",
+    viewBox: "0 0 24 24",
+    stroke: "currentColor"
+  }, /*#__PURE__*/React.createElement("path", {
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    strokeWidth: 2,
+    d: "M21 11.166V12a9 9 0 11-18 0v-.834m15.999 0h-.001m.001 0a2 2 0 10-4 0 2 2 0 004 0zM12 2a1 1 0 011 1v1m0 16v1m-9-9h-1M4 12H3m15.325 3.325l-.707.707M6.372 6.372l-.707-.707m12.728 0l-.707-.707M6.372 17.628l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"
+  })), /*#__PURE__*/React.createElement("p", {
+    className: "text-yellow-800 dark:text-yellow-200 font-semibold text-xl"
+  }, "Happy Birthday, ", user.name, "! \uD83C\uDF89")), activeTab === 'dashboard' && /*#__PURE__*/React.createElement("section", {
     className: "space-y-8"
   }, unreadNotificationsCount > 0 && /*#__PURE__*/React.createElement("div", {
     className: "bg-orange-100 dark:bg-orange-900 p-4 rounded-lg shadow-md flex items-center justify-between transition-colors duration-300"
@@ -570,6 +733,29 @@ const EmployeeDashboard = ({
     d: "M10 18a8 8 0 100-16 8 8 0 000 16zM7 9a1 1 0 000 2h6a1 1 0 100-2H7z",
     clipRule: "evenodd"
   })), "Check Out")))), /*#__PURE__*/React.createElement("div", {
+    className: `p-6 rounded-lg shadow-xl transition-colors duration-300 ${darkMode ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'}`
+  }, /*#__PURE__*/React.createElement("h3", {
+    className: "text-2xl font-bold mb-4 text-center"
+  }, "Birthdays This Month (", moment().format('MMMM'), ")"), birthdaysThisMonth.length > 0 ? /*#__PURE__*/React.createElement("ul", {
+    className: "space-y-3"
+  }, birthdaysThisMonth.map(person => /*#__PURE__*/React.createElement("li", {
+    key: person.id,
+    className: `flex items-center p-3 rounded-md ${darkMode ? 'bg-gray-700 text-gray-200' : 'bg-blue-50 text-blue-800'}`
+  }, person.profile_photo_url ? /*#__PURE__*/React.createElement("img", {
+    src: person.profile_photo_url,
+    alt: person.name,
+    className: "w-10 h-10 rounded-full object-cover mr-3"
+  }) : /*#__PURE__*/React.createElement("div", {
+    className: "w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 text-lg font-bold mr-3"
+  }, person.name.charAt(0).toUpperCase()), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("p", {
+    className: "font-semibold"
+  }, person.name), /*#__PURE__*/React.createElement("p", {
+    className: "text-sm opacity-80"
+  }, moment(person.date_of_birth).format('MMMM Do'), person.id === user?.id && /*#__PURE__*/React.createElement("span", {
+    className: "ml-2 text-yellow-500"
+  }, " (It's you!)")))))) : /*#__PURE__*/React.createElement("p", {
+    className: `text-center text-gray-500 ${darkMode ? 'dark:text-gray-400' : ''}`
+  }, "No birthdays this month.")), /*#__PURE__*/React.createElement("div", {
     className: `p-6 rounded-lg shadow-xl transition-colors duration-300 ${darkMode ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'}`
   }, /*#__PURE__*/React.createElement("h3", {
     className: "text-2xl font-bold mb-4 text-center"
@@ -768,7 +954,61 @@ const EmployeeDashboard = ({
     showMessage: showMessage,
     apiBaseUrl: apiBaseUrl,
     accessToken: accessToken
-  })), activeTab === 'profile' && /*#__PURE__*/React.createElement("section", {
+  })), activeTab === 'view-profile' && /*#__PURE__*/React.createElement("section", {
+    className: `p-6 rounded-lg shadow-md transition-colors duration-300 ${darkMode ? 'bg-gray-800' : 'bg-white'}`
+  }, /*#__PURE__*/React.createElement("h2", {
+    className: "text-3xl font-bold mb-8"
+  }, "My Profile Details"), /*#__PURE__*/React.createElement("div", {
+    className: "space-y-4"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center space-x-4"
+  }, user?.profile_photo_url ? /*#__PURE__*/React.createElement("img", {
+    src: user.profile_photo_url,
+    alt: "Profile",
+    className: "w-24 h-24 rounded-full object-cover border-2 border-blue-500"
+  }) : /*#__PURE__*/React.createElement("div", {
+    className: "w-24 h-24 rounded-full bg-gray-300 dark:bg-gray-600 flex items-center justify-center text-gray-500 dark:text-gray-400 text-4xl"
+  }, user?.name ? user.name[0].toUpperCase() : '?'), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("p", {
+    className: "text-xl font-semibold"
+  }, user?.name || 'N/A'), /*#__PURE__*/React.createElement("p", {
+    className: "text-gray-600 dark:text-gray-400"
+  }, user?.email || 'N/A'))), /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-1 md:grid-cols-2 gap-4"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    className: "font-medium"
+  }, "Employee ID:"), " ", user?.employee_id || 'N/A'), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    className: "font-medium"
+  }, "Mobile Number:"), " ", user?.mobile_number || 'N/A'), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    className: "font-medium"
+  }, "Address:"), " ", user?.address || 'N/A'), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    className: "font-medium"
+  }, "Date of Birth:"), " ", user?.date_of_birth ? moment(user.date_of_birth).format('YYYY-MM-DD') : 'N/A'), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    className: "font-medium"
+  }, "PAN Card Number:"), " ", user?.pan_card_number || 'N/A'), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    className: "font-medium"
+  }, "Bank Account Number:"), " ", user?.bank_account_number || 'N/A'), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    className: "font-medium"
+  }, "IFSC Code:"), " ", user?.ifsc_code || 'N/A'), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    className: "font-medium"
+  }, "Bank Name:"), " ", user?.bank_name || 'N/A'), /*#__PURE__*/React.createElement("div", {
+    className: "md:col-span-2"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "font-medium"
+  }, "KYC Details:"), " ", user?.kyc_details || 'N/A'), /*#__PURE__*/React.createElement("div", {
+    className: "md:col-span-2"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "font-medium"
+  }, "Personal Details:"), " ", user?.personal_details || 'N/A'), /*#__PURE__*/React.createElement("div", {
+    className: "md:col-span-2"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "font-medium"
+  }, "Family History:"), " ", user?.family_history || 'N/A'), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    className: "font-medium"
+  }, "Role:"), " ", user?.role || 'N/A'), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    className: "font-medium"
+  }, "Shift Type:"), " ", user?.shift_type || 'N/A'), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    className: "font-medium"
+  }, "Joined On:"), " ", user?.created_at ? moment(user.created_at).format('YYYY-MM-DD') : 'N/A')))), activeTab === 'profile' && /*#__PURE__*/React.createElement("section", {
     className: `p-6 rounded-lg shadow-md transition-colors duration-300 ${darkMode ? 'bg-gray-800' : 'bg-white'}`
   }, /*#__PURE__*/React.createElement("h2", {
     className: "text-3xl font-bold mb-8"

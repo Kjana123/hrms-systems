@@ -12,7 +12,7 @@ const AdminDashboard = ({
   accessToken
 }) => {
   // Define the maximum number of users allowed
-  const MAX_ALLOWED_USERS = 10; // You can change this number as needed
+  const MAX_ALLOWED_USERS = 30; // You can change this number as needed
   // State for managing employees, attendance records, and UI elements
   const [employees, setEmployees] = React.useState([]);
   const [attendanceRecords, setAttendanceRecords] = React.useState([]);
@@ -50,8 +50,11 @@ const AdminDashboard = ({
   const [editedProfileData, setEditedProfileData] = React.useState(null);
   const [profilePhotoFile, setProfilePhotoFile] = React.useState(null); // For new profile picture upload
 
+  // NEW STATE: For birthdays this month
+  const [birthdaysThisMonth, setBirthdaysThisMonth] = React.useState([]);
+
   // New: Active tab for main navigation
-  const [activeTab, setActiveTab] = React.useState('employees'); // 'employees', 'attendance', 'leave-management', 'holidays', 'weekly-offs', 'notifications', 'analytics', 'correction-review'
+  const [activeTab, setActiveTab] = React.useState('employees'); // 'employees', 'attendance', 'leave-management', 'holidays', 'weekly-offs', 'notifications', 'analytics', 'correction-review', 'profile-requests', 'payroll'
 
   // NEW: States for filtering attendance records from analytics clicks
   const [attendanceFilterStatus, setAttendanceFilterStatus] = React.useState('');
@@ -95,6 +98,43 @@ const AdminDashboard = ({
     return 'N/A'; // Default if no specific type is identified
   };
 
+  // Function to fetch birthday data
+  const fetchBirthdays = async () => {
+    try {
+      const response = await authAxios.get('/api/admin/employees/birthdays-this-month');
+      setBirthdaysThisMonth(response.data.birthdays);
+      // The backend automatically sends notifications, so no frontend action needed here
+    } catch (error) {
+      console.error("Error fetching birthdays:", error.response?.data?.message || error.message);
+      showMessage(`Error fetching birthdays: ${error.response?.data?.message || error.message}`, "error");
+    }
+  };
+  React.useEffect(() => {
+    const fetchOverallStats = async () => {
+      if (!accessToken || !authAxios) {
+        console.warn("AdminDashboard: Missing accessToken or authAxios, cannot fetch overall stats.");
+        return;
+      }
+      try {
+        const response = await authAxios.get(`${apiBaseUrl}/api/admin/stats`);
+        setAdminStats({
+          total_employees: response.data.totalUsers,
+          presentToday: response.data.presentToday,
+          absentToday: response.data.absentToday,
+          onLeaveToday: response.data.onLeaveToday,
+          grand_total_working_hours: response.data.grandTotalWorkingHours,
+          pending_leave_requests: response.data.pending_leave_requests,
+          pending_correction_requests: response.data.pending_correction_requests
+        });
+      } catch (error) {
+        console.error("Error fetching overall admin stats in AdminDashboard:", error.response?.data?.message || error.message);
+        showMessage(`Failed to load overall statistics: ${error.response?.data?.message || error.message}`, "error");
+        setAdminStats(null);
+      }
+    };
+    fetchOverallStats();
+  }, [accessToken, authAxios, apiBaseUrl, showMessage]);
+
   // Effect hook to fetch data based on active tab and other dependencies
   React.useEffect(() => {
     const fetchData = async () => {
@@ -105,12 +145,11 @@ const AdminDashboard = ({
       setLoading(true);
       try {
         // Fetch employees for common use (e.g., dropdowns)
-        // MODIFIED: Assumes backend /api/admin/users returns full profile data
+        // This now fetches all new profile data as per backend update
         const employeesResponse = await authAxios.get('/api/admin/users');
         setEmployees(employeesResponse.data);
         if (activeTab === 'attendance') {
           // Fetch attendance records (admin view, for a specific date or all)
-          // MODIFIED: Include status and department filters in the API call
           const params = {
             date: filterDate || moment().format('YYYY-MM-DD'),
             status: attendanceFilterStatus,
@@ -124,9 +163,10 @@ const AdminDashboard = ({
           // Always fetch admin stats when analytics tab is active
           const statsResponse = await authAxios.get(`${apiBaseUrl}/api/admin/stats`);
           setAdminStats(statsResponse.data);
-          // For monthly summary, we might need a separate component or more state
+          // Also fetch birthdays when analytics tab is active
+          fetchBirthdays();
         }
-        // Other tabs (leave-management, holidays, weekly-offs, notifications, correction-review)
+        // Other tabs (leave-management, holidays, weekly-offs, notifications, correction-review, profile-requests, payroll)
         // will have their own components fetching data
       } catch (error) {
         console.error("Error fetching data for admin dashboard:", error.response?.data?.message || error.message);
@@ -136,6 +176,8 @@ const AdminDashboard = ({
       }
     };
     fetchData();
+    // Initial fetch for birthdays on component mount (can be moved to analytics tab if preferred)
+    // fetchBirthdays(); // If you want to fetch birthdays regardless of active tab on initial load
   }, [accessToken, activeTab, filterDate, attendanceFilterStatus, attendanceFilterDepartment, authAxios]); // Re-fetch when token, activeTab, filter, or authAxios changes
 
   // Function to handle clicks from analytics cards
@@ -158,58 +200,47 @@ const AdminDashboard = ({
   );
 
   // Filtered attendance records based on search query and date (already handled by backend filterDate if passed)
-  // This client-side filter is mostly for refining results if the backend doesn't handle all combinations,
-  // or for the search bar when attendanceFilterStatus/Department are active.
   const displayAttendanceRecords = attendanceRecords.filter(record => {
     const employee = employees.find(emp => emp.id === record.user_id);
     const matchesSearch = employee && (employee.name.toLowerCase().includes(searchQuery.toLowerCase()) || employee.employee_id.toLowerCase().includes(searchQuery.toLowerCase()));
-    // Backend should ideally handle status/department filtering, but keeping this for robustness
     const matchesStatus = attendanceFilterStatus ? record.status.toLowerCase() === attendanceFilterStatus.toLowerCase() : true;
-    // const matchesDepartment = attendanceFilterDepartment ? employee.department === attendanceFilterDepartment : true; // Uncomment if employee has department
-
-    return matchesSearch && matchesStatus; // && matchesDepartment;
+    return matchesSearch && matchesStatus;
   });
 
   // Function to handle saving (add or update) an employee from the main employee form
   const handleSaveEmployee = async () => {
     if (!newEmployeeName || !newEmployeeEmail || !newEmployeeId || !newEmployeeRole || !newEmployeeShiftType) {
-      // Password is only required for new employee creation
       if (!isEditingEmployee || newEmployeePassword) {
-        // If not editing, or editing but password field is empty
         showMessage('All employee fields are required.', 'error');
         return;
       }
     }
-
-    // --- START NEW MODIFICATION FOR USER LIMIT ---
-    // Check if adding a new employee and if the limit has been reached
     if (!isEditingEmployee && employees.length >= MAX_ALLOWED_USERS) {
       showMessage(`User limit of ${MAX_ALLOWED_USERS} reached. Cannot add more employees.`, 'error');
-      // Reset the form if the user tries to add when limit is reached
       resetEmployeeForm();
-      return; // Stop the function execution
+      return;
     }
-    // --- END NEW MODIFICATION ---
-
     const employeeData = {
       name: newEmployeeName,
       email: newEmployeeEmail,
       employee_id: newEmployeeId,
       role: newEmployeeRole,
       shift_type: newEmployeeShiftType
+      // New fields for registration/update through main form (if you want to add inputs here)
+      // pan_card_number: newPanCardNumber, // Example if you add states for these
+      // bank_account_number: newBankAccountNumber,
+      // ifsc_code: newIfscCode,
+      // bank_name: newBankName,
+      // date_of_birth: newDateOfBirth,
     };
-
-    // Only include password if it's a new employee or if password field is explicitly filled during edit
     if (!isEditingEmployee || newEmployeePassword) {
       employeeData.password = newEmployeePassword;
     }
     try {
       if (isEditingEmployee && editingEmployeeData) {
-        // Update existing employee
-        await authAxios.put(`${apiBaseUrl}/admin/users/${editingEmployeeData.id}`, employeeData);
+        await authAxios.put(`${apiBaseUrl}api/admin/users/${editingEmployeeData.id}`, employeeData);
         showMessage('Employee updated successfully!', 'success');
       } else {
-        // Add new employee
         await authAxios.post(`${apiBaseUrl}/admin/register-employee`, employeeData);
         showMessage('Employee added successfully!', 'success');
       }
@@ -224,7 +255,7 @@ const AdminDashboard = ({
       setIsEditingEmployee(false);
       setEditingEmployeeData(null);
 
-      // Re-fetch employees
+      // Re-fetch employees to update the list with new data
       const employeesResponse = await authAxios.get('/api/admin/users');
       setEmployees(employeesResponse.data);
     } catch (error) {
@@ -235,7 +266,7 @@ const AdminDashboard = ({
 
   // Function to initiate editing an employee from the main employee table
   const editEmployee = employee => {
-    console.log("DEBUG: editEmployee function called for employee:", employee.name); // NEW DEBUG LOG
+    console.log("DEBUG: editEmployee function called for employee:", employee.name);
     setIsAddingEmployee(true); // Open the form
     setIsEditingEmployee(true); // Set to editing mode
     setEditingEmployeeData(employee); // Store data of employee being edited
@@ -247,6 +278,7 @@ const AdminDashboard = ({
     setNewEmployeeRole(employee.role);
     setNewEmployeeShiftType(employee.shift_type);
     setNewEmployeePassword(''); // Clear password field for security (don't pre-fill)
+    // If you add new fields to the main add/edit form, populate them here too
   };
 
   // Function to reset the employee form (used for cancel or after save)
@@ -260,6 +292,7 @@ const AdminDashboard = ({
     setNewEmployeePassword('');
     setNewEmployeeRole('employee');
     setNewEmployeeShiftType('day');
+    // Reset new states for new fields if you add them to this form
   };
 
   // Function to delete an employee
@@ -293,16 +326,6 @@ const AdminDashboard = ({
         userId: selectedEmployeeId
       };
       if (editingAttendanceId) {
-        // For editing, we'll use the correction-review endpoint to "force" an attendance record.
-        // This is a simplification. A more robust solution might have a direct 'admin add/update attendance' endpoint.
-        // We assume the backend's correction-review can handle direct updates if a correction doesn't exist.
-        // The current backend logic for /admin/attendance/correction-review implies it's for *pending* corrections.
-        // To truly edit an existing attendance record, a separate PUT /api/admin/attendance endpoint would be ideal.
-        // For this example, we'll assume the correction-review endpoint can be used to "force" a state.
-        // This part might need further refinement based on the exact backend implementation for direct admin edits.
-
-        // Simplified approach: Create a correction request and immediately approve it.
-        // This ensures the backend's logic for processing corrections is used.
         const newCorrectionResponse = await authAxios.post(`${apiBaseUrl}/api/attendance/correction-request`, payload);
         await authAxios.post(`${apiBaseUrl}/admin/attendance/correction-review`, {
           id: newCorrectionResponse.data.data.id,
@@ -315,7 +338,6 @@ const AdminDashboard = ({
         });
         showMessage('Attendance record updated/corrected successfully!', 'success');
       } else {
-        // For adding new attendance, submit a correction request and immediately approve it.
         const newCorrectionResponse = await authAxios.post(`${apiBaseUrl}/api/attendance/correction-request`, payload);
         await authAxios.post(`${apiBaseUrl}/admin/attendance/correction-review`, {
           id: newCorrectionResponse.data.data.id,
@@ -356,9 +378,8 @@ const AdminDashboard = ({
   const editAttendance = record => {
     setSelectedEmployeeId(record.user_id);
     setSelectedDate(record.date);
-    // Convert 'hh:mm A' to 'HH:mm' for input type="time"
-    setCheckInTime(record.check_in && record.check_in !== 'N/A' ? moment(record.check_in, 'hh:mm A').format('HH:mm') : '');
-    setCheckOutTime(record.check_out && record.check_out !== 'N/A' ? moment(record.check_out, 'hh:mm A').format('HH:mm') : '');
+    setCheckInTime(record.check_in && record.check_in !== 'N/A' ? moment(record.check_in, 'HH:mm:ss').format('HH:mm') : ''); // Ensure HH:mm format
+    setCheckOutTime(record.check_out && record.check_out !== 'N/A' ? moment(record.check_out, 'HH:mm:ss').format('HH:mm') : ''); // Ensure HH:mm format
     setEditingAttendanceId(record.user_id); // Use user_id as identifier for editing
     setIsAddingAttendance(true); // Open the form for editing
   };
@@ -367,7 +388,6 @@ const AdminDashboard = ({
   const deleteAttendance = async (userIdToDelete, dateToDelete) => {
     if (window.confirm('Are you sure you want to mark this attendance record as absent? This will remove check-in/out times.')) {
       try {
-        // Use the mark-absent-forgotten-checkout endpoint to set status to absent
         await authAxios.post(`${apiBaseUrl}/admin/attendance/mark-absent-forgotten-checkout`, {
           userId: userIdToDelete,
           date: dateToDelete
@@ -403,7 +423,6 @@ const AdminDashboard = ({
       return;
     }
     try {
-      // Backend handles the CSV generation and sends it as a file
       const response = await authAxios.get(`${apiBaseUrl}/api/admin/export-attendance`, {
         params: {
           year: startMoment.year(),
@@ -413,8 +432,6 @@ const AdminDashboard = ({
         },
         responseType: 'blob' // Important for handling file downloads
       });
-
-      // Use FileSaver.js to save the blob
       const filename = response.headers['content-disposition']?.split('filename=')[1] || `attendance_report_${exportStartDate}_to_${exportEndDate}.csv`;
       saveAs(response.data, filename);
       showMessage('Attendance data exported successfully!', 'success');
@@ -431,15 +448,16 @@ const AdminDashboard = ({
   // Function to open employee profile modal
   const viewEmployeeProfile = employee => {
     setViewingEmployeeProfile(employee);
+    // Initialize edited data with current employee data, including new fields
     setEditedProfileData({
-      ...employee
-    }); // Initialize edited data with current employee data
+      ...employee,
+      // Ensure date_of_birth is in YYYY-MM-DD format for input type="date"
+      date_of_birth: employee.date_of_birth ? moment(employee.date_of_birth).format('YYYY-MM-DD') : ''
+    });
     setIsEditingProfileInModal(false); // Start in view mode
     setProfilePhotoFile(null); // Clear any previously selected file
     setShowProfileModal(true);
-    // --- DEBUG LOG START ---
     console.log("DEBUG: Viewing Employee Profile:", employee);
-    // --- DEBUG LOG END ---
   };
 
   // Handle changes in the editable profile fields within the modal
@@ -465,22 +483,23 @@ const AdminDashboard = ({
     setLoading(true); // Indicate loading while saving
     try {
       const formData = new FormData();
-      // Append all edited text fields
+      // Append all edited text fields, including new ones
       for (const key in editedProfileData) {
-        // For KYC, Personal, and Family History, send as plain text
-        formData.append(key, editedProfileData[key] || '');
+        // Exclude profile_photo_url as it's not a direct database field for update
+        if (key !== 'profile_photo_url') {
+          formData.append(key, editedProfileData[key] || '');
+        }
       }
 
       // Append profile photo file if selected
       if (profilePhotoFile) {
-        formData.append('photo', profilePhotoFile); // Changed to 'photo' to match backend upload.single('photo')
+        formData.append('photo', profilePhotoFile);
       }
 
-      // Make a PUT request to update the employee
-      // Note: Axios with FormData automatically sets Content-Type to multipart/form-data
-      await authAxios.put(`${apiBaseUrl}/admin/users/${editedProfileData.id}`, formData, {
+      // CORRECTED: Added '/api' prefix to the PUT request URL
+      await authAxios.put(`${apiBaseUrl}/api/admin/users/${editedProfileData.id}`, formData, {
         headers: {
-          'Content-Type': 'multipart/form-data' // Important for file uploads
+          'Content-Type': 'multipart/form-data'
         }
       });
       showMessage('Employee profile updated successfully!', 'success');
@@ -590,8 +609,7 @@ const AdminDashboard = ({
     },
     className: `w-full text-left py-2 px-4 rounded-md font-medium transition-colors duration-200 ${activeTab === 'correction-review' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:text-gray-700'}`
   }, "Correction Review"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setActiveTab('profile-requests') // Assuming you have an activeTab state
-    ,
+    onClick: () => setActiveTab('profile-requests'),
     className: `w-full text-left py-2 px-4 rounded-md font-medium transition-colors duration-200 ${activeTab === 'profile-requests' ? darkMode ? 'bg-purple-600 text-white shadow-md' : 'bg-indigo-600 text-white shadow-md' : darkMode ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-200'}`
   }, "Profile Requests"), /*#__PURE__*/React.createElement("button", {
     onClick: () => setActiveTab('payroll'),
@@ -667,10 +685,7 @@ const AdminDashboard = ({
     className: "text-2xl font-semibold mb-6"
   }, "Manage Employees"), /*#__PURE__*/React.createElement("div", {
     className: "mb-6"
-  }, employees.length < MAX_ALLOWED_USERS &&
-  /*#__PURE__*/
-  // <--- ADD THIS LINE
-  React.createElement("button", {
+  }, employees.length < MAX_ALLOWED_USERS && /*#__PURE__*/React.createElement("button", {
     onClick: () => {
       if (isAddingEmployee) {
         // If currently open, close and reset
@@ -692,7 +707,7 @@ const AdminDashboard = ({
     fillRule: "evenodd",
     d: "M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z",
     clipRule: "evenodd"
-  })), isAddingEmployee ? 'Cancel' : 'Add New Employee'), " ", isAddingEmployee && /*#__PURE__*/React.createElement("div", {
+  })), isAddingEmployee ? 'Cancel' : 'Add New Employee'), isAddingEmployee && /*#__PURE__*/React.createElement("div", {
     className: "mt-4 p-4 border border-gray-200 dark:border-gray-700 rounded-md bg-gray-50 dark:bg-gray-700"
   }, /*#__PURE__*/React.createElement("h3", {
     className: "text-lg font-medium mb-4"
@@ -725,7 +740,7 @@ const AdminDashboard = ({
     className: "px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-blue-500 focus:border-blue-500",
     value: newEmployeePassword,
     onChange: e => setNewEmployeePassword(e.target.value),
-    required: !isEditingEmployee // Required only if not editing
+    required: !isEditingEmployee
   }), /*#__PURE__*/React.createElement("select", {
     className: "px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-blue-500 focus:border-blue-500",
     value: newEmployeeRole,
@@ -765,10 +780,20 @@ const AdminDashboard = ({
     className: "px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"
   }, "Shift"), /*#__PURE__*/React.createElement("th", {
     className: "px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"
+  }, "PAN"), /*#__PURE__*/React.createElement("th", {
+    className: "px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"
+  }, "Bank Acc."), /*#__PURE__*/React.createElement("th", {
+    className: "px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"
+  }, "IFSC"), /*#__PURE__*/React.createElement("th", {
+    className: "px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"
+  }, "Bank Name"), /*#__PURE__*/React.createElement("th", {
+    className: "px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"
+  }, "DOB"), /*#__PURE__*/React.createElement("th", {
+    className: "px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"
   }, "Actions"))), /*#__PURE__*/React.createElement("tbody", {
     className: "bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700"
   }, filteredEmployees.length > 0 ? filteredEmployees.map(employee => {
-    console.log("DEBUG: Rendering Edit button for employee:", employee.name); // NEW DEBUG LOG
+    console.log("DEBUG: Rendering Edit button for employee:", employee.name);
     return /*#__PURE__*/React.createElement("tr", {
       key: employee.id,
       className: "hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-150"
@@ -783,21 +808,30 @@ const AdminDashboard = ({
     }, employee.role), /*#__PURE__*/React.createElement("td", {
       className: "px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300"
     }, employee.shift_type), /*#__PURE__*/React.createElement("td", {
+      className: "px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300"
+    }, employee.pan_card_number || 'N/A'), /*#__PURE__*/React.createElement("td", {
+      className: "px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300"
+    }, employee.bank_account_number || 'N/A'), /*#__PURE__*/React.createElement("td", {
+      className: "px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300"
+    }, employee.ifsc_code || 'N/A'), /*#__PURE__*/React.createElement("td", {
+      className: "px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300"
+    }, employee.bank_name || 'N/A'), /*#__PURE__*/React.createElement("td", {
+      className: "px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300"
+    }, employee.date_of_birth ? moment(employee.date_of_birth).format('YYYY-MM-DD') : 'N/A'), /*#__PURE__*/React.createElement("td", {
       className: "px-6 py-4 whitespace-nowrap text-sm font-medium"
     }, /*#__PURE__*/React.createElement("button", {
       onClick: () => viewEmployeeProfile(employee) // New: View Profile button
       ,
       className: "text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300 mr-4 transition-colors duration-200"
     }, "View Profile"), /*#__PURE__*/React.createElement("button", {
-      onClick: () => editEmployee(employee) // NEW: Edit Employee button
-      ,
+      onClick: () => editEmployee(employee),
       className: "text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-300 mr-4 transition-colors duration-200"
     }, "Edit"), /*#__PURE__*/React.createElement("button", {
       onClick: () => deleteEmployee(employee.id),
       className: "text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300 transition-colors duration-200"
     }, "Delete")));
   }) : /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
-    colSpan: "6",
+    colSpan: "11",
     className: "px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400"
   }, "No employees found.")))))), activeTab === 'attendance' && /*#__PURE__*/React.createElement("section", {
     className: "bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-colors duration-300"
@@ -917,9 +951,9 @@ const AdminDashboard = ({
       className: "px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300"
     }, record.status), /*#__PURE__*/React.createElement("td", {
       className: "px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300"
-    }, getDeviceType(record.check_in_device)), " ", /*#__PURE__*/React.createElement("td", {
+    }, getDeviceType(record.check_in_device)), /*#__PURE__*/React.createElement("td", {
       className: "px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300"
-    }, getDeviceType(record.check_out_device)), " ", /*#__PURE__*/React.createElement("td", {
+    }, getDeviceType(record.check_out_device)), /*#__PURE__*/React.createElement("td", {
       className: "px-6 py-4 whitespace-nowrap text-sm font-medium"
     }, /*#__PURE__*/React.createElement("button", {
       onClick: () => editAttendance(record),
@@ -935,36 +969,51 @@ const AdminDashboard = ({
     showMessage: showMessage,
     apiBaseUrl: apiBaseUrl,
     accessToken: accessToken,
-    authAxios: authAxios // Pass authAxios
+    authAxios: authAxios
   }), activeTab === 'holidays' && /*#__PURE__*/React.createElement(HolidayManagement, {
     showMessage: showMessage,
     apiBaseUrl: apiBaseUrl,
     accessToken: accessToken,
-    authAxios: authAxios // Pass authAxios
+    authAxios: authAxios
   }), activeTab === 'weekly-offs' && /*#__PURE__*/React.createElement(WeeklyOffManagement, {
     showMessage: showMessage,
     apiBaseUrl: apiBaseUrl,
     accessToken: accessToken,
-    authAxios: authAxios // Pass authAxios
+    authAxios: authAxios
   }), activeTab === 'notifications' && /*#__PURE__*/React.createElement(AdminNotifications, {
     showMessage: showMessage,
     apiBaseUrl: apiBaseUrl,
     accessToken: accessToken,
-    authAxios: authAxios // Pass authAxios
-  }), activeTab === 'analytics' && /*#__PURE__*/React.createElement(AdminAnalyticsReports, {
+    authAxios: authAxios
+  }), activeTab === 'analytics' && /*#__PURE__*/React.createElement("section", {
+    className: "bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md mb-8 transition-colors duration-300"
+  }, /*#__PURE__*/React.createElement(AdminAnalyticsReports, {
     showMessage: showMessage,
     apiBaseUrl: apiBaseUrl,
     accessToken: accessToken,
-    authAxios: authAxios // Pass authAxios
-    ,
-    adminStats: adminStats // Pass stats to analytics component
-    ,
-    handleAnalyticsClick: handleAnalyticsClick // Pass the new click handler
-  }), activeTab === 'correction-review' && /*#__PURE__*/React.createElement(AdminCorrectionReview, {
+    authAxios: authAxios,
+    adminStats: adminStats,
+    handleAnalyticsClick: handleAnalyticsClick
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "mt-8 pt-6 border-t border-gray-200 dark:border-gray-700"
+  }, /*#__PURE__*/React.createElement("h3", {
+    className: "text-xl font-semibold mb-4"
+  }, "Birthdays This Month"), birthdaysThisMonth.length > 0 ? /*#__PURE__*/React.createElement("ul", {
+    className: "list-disc list-inside space-y-2"
+  }, birthdaysThisMonth.map(emp => /*#__PURE__*/React.createElement("li", {
+    key: emp.id,
+    className: "text-gray-700 dark:text-gray-300"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "font-medium"
+  }, emp.name), " - ", moment(emp.date_of_birth).format('MMMM Do'), moment(emp.date_of_birth).date() === moment().date() && /*#__PURE__*/React.createElement("span", {
+    className: "ml-2 px-2 py-1 bg-yellow-100 text-yellow-800 text-xs font-semibold rounded-full dark:bg-yellow-800 dark:text-yellow-100"
+  }, "Today! \uD83C\uDF82")))) : /*#__PURE__*/React.createElement("p", {
+    className: "text-gray-500 dark:text-gray-400"
+  }, "No birthdays this month."))), activeTab === 'correction-review' && /*#__PURE__*/React.createElement(AdminCorrectionReview, {
     showMessage: showMessage,
     apiBaseUrl: apiBaseUrl,
     accessToken: accessToken,
-    authAxios: authAxios // Pass authAxios
+    authAxios: authAxios
   }), activeTab === 'profile-requests' && /*#__PURE__*/React.createElement("section", {
     className: `p-6 rounded-lg shadow-md transition-colors duration-300 ${darkMode ? 'bg-gray-800' : 'bg-white'}`
   }, /*#__PURE__*/React.createElement(AdminProfileRequests, {
@@ -977,9 +1026,8 @@ const AdminDashboard = ({
     apiBaseUrl: apiBaseUrl,
     accessToken: accessToken,
     authAxios: authAxios,
-    employees: employees // Pass employees for selection in sub-components
-    ,
-    darkMode: darkMode // Pass dark mode for styling
+    employees: employees,
+    darkMode: darkMode
   })), showExportModal && /*#__PURE__*/React.createElement("div", {
     className: "fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50"
   }, /*#__PURE__*/React.createElement("div", {
@@ -1035,7 +1083,7 @@ const AdminDashboard = ({
     className: "text-2xl font-semibold mb-6"
   }, isEditingProfileInModal ? `Edit Profile: ${editedProfileData.name}` : `Employee Profile: ${viewingEmployeeProfile.name}`), /*#__PURE__*/React.createElement("div", {
     className: "space-y-4 overflow-y-auto flex-1 pr-2"
-  }, " ", /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", {
     className: "flex flex-col items-center mb-4"
   }, /*#__PURE__*/React.createElement("img", {
     src: editedProfileData.profile_photo_url || "https://placehold.co/128x128/cccccc/000000?text=No+Image",
@@ -1118,10 +1166,8 @@ const AdminDashboard = ({
     className: "block text-sm font-medium text-gray-700 dark:text-gray-300"
   }, "Phone Number:"), isEditingProfileInModal ? /*#__PURE__*/React.createElement("input", {
     type: "text",
-    name: "mobile_number" // Corrected name to mobile_number
-    ,
-    value: editedProfileData.mobile_number || '' // Corrected to mobile_number
-    ,
+    name: "mobile_number",
+    value: editedProfileData.mobile_number || '',
     onChange: handleProfileEditChange,
     className: "mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500",
     placeholder: "Enter phone number"
@@ -1140,7 +1186,64 @@ const AdminDashboard = ({
     placeholder: "Enter employee's address"
   }) : /*#__PURE__*/React.createElement("p", {
     className: "mt-1 text-gray-900 dark:text-white"
-  }, viewingEmployeeProfile.address || 'N/A')), /*#__PURE__*/React.createElement("div", {
+  }, viewingEmployeeProfile.address || 'N/A')), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "block text-sm font-medium text-gray-700 dark:text-gray-300"
+  }, "PAN Card Number:"), isEditingProfileInModal ? /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    name: "pan_card_number",
+    value: editedProfileData.pan_card_number || '',
+    onChange: handleProfileEditChange,
+    className: "mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500",
+    placeholder: "Enter PAN card number"
+  }) : /*#__PURE__*/React.createElement("p", {
+    className: "mt-1 text-gray-900 dark:text-white"
+  }, viewingEmployeeProfile.pan_card_number || 'N/A')), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "block text-sm font-medium text-gray-700 dark:text-gray-300"
+  }, "Date of Birth:"), isEditingProfileInModal ? /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    name: "date_of_birth",
+    value: editedProfileData.date_of_birth || '' // Should be YYYY-MM-DD
+    ,
+    onChange: handleProfileEditChange,
+    className: "mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+  }) : /*#__PURE__*/React.createElement("p", {
+    className: "mt-1 text-gray-900 dark:text-white"
+  }, viewingEmployeeProfile.date_of_birth ? moment(viewingEmployeeProfile.date_of_birth).format('YYYY-MM-DD') : 'N/A')), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "block text-sm font-medium text-gray-700 dark:text-gray-300"
+  }, "Bank Account Number:"), isEditingProfileInModal ? /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    name: "bank_account_number",
+    value: editedProfileData.bank_account_number || '',
+    onChange: handleProfileEditChange,
+    className: "mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500",
+    placeholder: "Enter bank account number"
+  }) : /*#__PURE__*/React.createElement("p", {
+    className: "mt-1 text-gray-900 dark:text-white"
+  }, viewingEmployeeProfile.bank_account_number || 'N/A')), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "block text-sm font-medium text-gray-700 dark:text-gray-300"
+  }, "IFSC Code:"), isEditingProfileInModal ? /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    name: "ifsc_code",
+    value: editedProfileData.ifsc_code || '',
+    onChange: handleProfileEditChange,
+    className: "mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500",
+    placeholder: "Enter IFSC code"
+  }) : /*#__PURE__*/React.createElement("p", {
+    className: "mt-1 text-gray-900 dark:text-white"
+  }, viewingEmployeeProfile.ifsc_code || 'N/A')), /*#__PURE__*/React.createElement("div", {
+    className: "md:col-span-2"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "block text-sm font-medium text-gray-700 dark:text-gray-300"
+  }, "Bank Name:"), isEditingProfileInModal ? /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    name: "bank_name",
+    value: editedProfileData.bank_name || '',
+    onChange: handleProfileEditChange,
+    className: "mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500",
+    placeholder: "Enter bank name"
+  }) : /*#__PURE__*/React.createElement("p", {
+    className: "mt-1 text-gray-900 dark:text-white"
+  }, viewingEmployeeProfile.bank_name || 'N/A')), /*#__PURE__*/React.createElement("div", {
     className: "md:col-span-2"
   }, /*#__PURE__*/React.createElement("label", {
     className: "block text-sm font-medium text-gray-700 dark:text-gray-300"
@@ -1150,7 +1253,7 @@ const AdminDashboard = ({
     onChange: handleProfileEditChange,
     rows: "3",
     className: "mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500",
-    placeholder: "Enter KYC details (e.g., Aadhaar number, PAN, etc.)"
+    placeholder: "Enter KYC details (e.g., Aadhaar number, etc.)"
   }) : /*#__PURE__*/React.createElement("p", {
     className: "mt-1 text-gray-900 dark:text-white"
   }, viewingEmployeeProfile.kyc_details || 'N/A')), /*#__PURE__*/React.createElement("div", {
@@ -1163,7 +1266,7 @@ const AdminDashboard = ({
     onChange: handleProfileEditChange,
     rows: "3",
     className: "mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500",
-    placeholder: "Enter personal details (e.g., Date of Birth, Marital Status, Blood Group)"
+    placeholder: "Enter personal details (e.g., Marital Status, Blood Group)"
   }) : /*#__PURE__*/React.createElement("p", {
     className: "mt-1 text-gray-900 dark:text-white"
   }, viewingEmployeeProfile.personal_details || 'N/A')), /*#__PURE__*/React.createElement("div", {
@@ -1199,3 +1302,6 @@ const AdminDashboard = ({
     className: "px-6 py-2 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
   }, "Close"))))));
 };
+
+// Make the component globally accessible
+window.AdminDashboard = AdminDashboard;

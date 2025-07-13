@@ -1,4 +1,3 @@
-// App.js
 // IMPORTANT: No Firebase imports or logic are included here.
 // Authentication relies solely on your backend's JWT and Axios.
 
@@ -21,8 +20,10 @@ const App = () => {
   // Base URL for your backend API
   const API_BASE_URL = 'https://hrms-backend-rhsc.onrender.com'; // Adjust if your backend runs on a different port/domain
 
+  // --- START OF NECESSARY CHANGES ---
+
   // Function to set the access token in Axios headers for all subsequent requests
-  const setAuthHeader = token => {
+  const setAuthHeader = React.useCallback(token => {
     if (token) {
       axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
       console.log("Axios Authorization header set.");
@@ -30,121 +31,169 @@ const App = () => {
       delete axios.defaults.headers.common['Authorization'];
       console.log("Axios Authorization header cleared.");
     }
-  };
+  }, []);
 
-  // Effect hook to check user authentication status on component mount
-  React.useEffect(() => {
-    const checkAuthStatus = async () => {
-      console.log("Attempting to check authentication status...");
-      setLoadingApp(true); // Start loading at the beginning of the check
-      try {
-        // Attempt to get user details from backend (will use existing token/refresh token)
-        // This endpoint should return user data if authenticated, or 401/403 if not.
-        const response = await axios.get(`${API_BASE_URL}/auth/me`);
-        const userData = response.data;
-        const newAccessToken = response.headers['x-new-access-token']; // Check for new token from backend
+  // Function to display messages (success or error)
+  const showMessage = React.useCallback((text, type) => {
+    setMessage({
+      text,
+      type
+    });
+    setTimeout(() => setMessage({
+      text: '',
+      type: ''
+    }), 5000); // Clear message after 5 seconds
+  }, []);
 
-        setUser(userData);
-        setIsAuthenticated(true);
-        setAccessToken(newAccessToken || accessToken); // Update if a new token is provided
-        setAuthHeader(newAccessToken || accessToken); // Ensure header is set with the latest token
+  // Function to toggle dark mode
+  const toggleDarkMode = React.useCallback(() => {
+    setDarkMode(prevMode => {
+      const newMode = !prevMode;
+      document.documentElement.classList.toggle('dark', newMode); // Apply class to html tag
+      localStorage.setItem('darkMode', JSON.stringify(newMode)); // Save preference
+      return newMode;
+    });
+  }, []);
 
-        console.log("Authentication check successful. User:", userData);
-        console.log("New Access Token from backend header:", newAccessToken ? "Received" : "None");
-        console.log("Current Access Token state (after successful check):", newAccessToken || accessToken ? "Present" : "Null");
-      } catch (error) {
-        console.error("Authentication check failed (likely no active session or token expired):", error.response?.data?.message || error.message);
-        setUser(null);
-        setAccessToken(null); // Explicitly clear token on failure
-        setIsAuthenticated(false);
-        setAuthHeader(null); // Clear header if authentication fails
-      } finally {
-        setLoadingApp(false); // Authentication check is complete
-        console.log("Authentication check process finished.");
-      }
-    };
-    checkAuthStatus();
-  }, []); // Run once on mount
-
-  // Log changes to isAuthenticated and accessToken for debugging
-  React.useEffect(() => {
-    console.log("isAuthenticated changed to:", isAuthenticated);
-    console.log("accessToken changed to:", accessToken ? "Present" : "Null");
-  }, [isAuthenticated, accessToken]);
-
-  // Function to handle user login (called from AuthForms)
-  const handleLogin = async (email, password) => {
-    setLoadingApp(true); // Set loading while logging in
-    try {
-      // Call your backend login API
-      const response = await axios.post(`${API_BASE_URL}/auth/login`, {
-        email,
-        password
-      });
-      const {
-        accessToken: receivedAccessToken,
-        user: userData
-      } = response.data; // Destructure received token
-
-      setAccessToken(receivedAccessToken);
-      setUser(userData);
-      setIsAuthenticated(true);
-      setAuthHeader(receivedAccessToken); // Set token for future requests immediately
-
-      showMessage('Login successful!', 'success');
-      console.log("Login successful. Received Access Token:", receivedAccessToken ? "Present" : "Null");
-    } catch (error) {
-      console.error("Login error:", error.response?.data?.message || error.message);
-      showMessage(error.response?.data?.message || 'Login failed. Please try again.', 'error');
-      setAccessToken(null); // Ensure token is cleared on login failure
-      setIsAuthenticated(false);
-      setAuthHeader(null);
-    } finally {
-      setLoadingApp(false); // Login attempt is complete
-    }
-  };
-
-  // Function to handle user logout
-  const handleLogout = async () => {
+  // Function to handle logout (defined early as it might be called by fetchUserProfile/refreshAccessToken)
+  const handleLogout = React.useCallback(async () => {
     setLoadingApp(true); // Set loading while logging out
     try {
-      await axios.post(`${API_BASE_URL}/auth/logout`);
+      await axios.post(`${API_BASE_URL}/auth/logout`, {}, {
+        withCredentials: true // Send cookies to clear refresh token on backend
+      });
       setUser(null);
       setIsAuthenticated(false);
       setAccessToken(null);
       setAuthHeader(null); // Clear header
+      localStorage.removeItem('accessToken'); // Clear access token from local storage
+      localStorage.removeItem('refreshToken'); // Ensure refresh token is also cleared
       showMessage('Logged out successfully.', 'success');
-      console.log("Logged out successfully.");
+      console.log("User logged out.");
     } catch (error) {
       console.error("Logout error:", error.response?.data?.message || error.message);
       showMessage(error.response?.data?.message || 'Logout failed.', 'error');
     } finally {
       setLoadingApp(false); // Logout attempt is complete
     }
-  };
+  }, [setAuthHeader, showMessage]);
 
-  // Function to toggle dark mode
-  const toggleDarkMode = () => {
-    setDarkMode(prevMode => {
-      const newMode = !prevMode;
-      document.documentElement.classList.toggle('dark', newMode);
-      return newMode;
-    });
-  };
+  // Function to fetch full user profile (defined early as it's called by handleLogin, refreshAccessToken)
+  const fetchUserProfile = React.useCallback(async token => {
+    try {
+      setAuthHeader(token); // Ensure header is set before fetching profile
+      const response = await axios.get(`${API_BASE_URL}/api/users/me`);
+      // Ensure all necessary fields are present, even if null from backend
+      const userData = {
+        ...response.data,
+        profile_photo_url: response.data.profile_photo_url || null,
+        pan_card_number: response.data.pan_card_number || null,
+        bank_account_number: response.data.bank_account_number || null,
+        ifsc_code: response.data.ifsc_code || null,
+        bank_name: response.data.bank_name || null,
+        date_of_birth: response.data.date_of_birth || null,
+        personal_details: response.data.personal_details || null,
+        family_history: response.data.family_history || null,
+        address: response.data.address || null,
+        mobile_number: response.data.mobile_number || null,
+        kyc_details: response.data.kyc_details || null,
+        created_at: response.data.created_at || null
+      };
+      setUser(userData);
+      setIsAuthenticated(true);
+      console.log("User profile fetched and set:", userData);
+      return userData;
+    } catch (error) {
+      console.error("Error fetching user profile:", error.response?.data?.message || error.message);
+      showMessage('Failed to fetch user profile.', 'error');
+      handleLogout(); // Call handleLogout here if profile fetch fails
+      return null;
+    }
+  }, [setAuthHeader, showMessage, handleLogout]);
 
-  // Function to display messages (now updates the message object)
-  const showMessage = (msg, type) => {
-    setMessage({
-      text: msg,
-      type: type
-    });
-    setTimeout(() => {
-      setMessage({
-        text: '',
-        type: ''
-      }); // Clear message after 3 seconds
-    }, 3000);
-  };
+  // Function to refresh access token using refresh token (now the primary initial auth check)
+  const refreshAccessToken = React.useCallback(async () => {
+    setLoadingApp(true); // Ensure loading is true at the start of refresh
+    const refreshToken = localStorage.getItem('refreshToken');
+    if (!refreshToken) {
+      console.log("No refresh token found. User needs to log in.");
+      setIsAuthenticated(false);
+      setLoadingApp(false); // Stop loading if no refresh token
+      return;
+    }
+    try {
+      console.log("Attempting to refresh access token...");
+      const response = await axios.post(`${API_BASE_URL}/auth/refresh-token`, {
+        refreshToken
+      });
+      const {
+        accessToken: newAccessToken
+      } = response.data;
+      setAccessToken(newAccessToken);
+      localStorage.setItem('accessToken', newAccessToken); // Store new access token
+      await fetchUserProfile(newAccessToken); // Fetch full profile after successful refresh
+      console.log("Access token refreshed successfully.");
+    } catch (error) {
+      console.error("Error refreshing token:", error.response?.data?.message || error.message);
+      showMessage('Session expired. Please log in again.', 'error');
+      handleLogout(); // Force logout if refresh fails
+    } finally {
+      setLoadingApp(false); // Stop loading after refresh attempt
+    }
+  }, [fetchUserProfile, showMessage, handleLogout]);
+
+  // Function to handle user login
+  const handleLogin = React.useCallback(async (email, password) => {
+    // Correctly accepts email, password
+    setLoadingApp(true); // Set loading while logging in
+    try {
+      const response = await axios.post(`${API_BASE_URL}/auth/login`, {
+        email,
+        password
+      }, {
+        // Sends as object
+        withCredentials: true
+      });
+      const {
+        accessToken: receivedAccessToken
+      } = response.data;
+      setAccessToken(receivedAccessToken);
+      localStorage.setItem('accessToken', receivedAccessToken);
+      await fetchUserProfile(receivedAccessToken); // Fetch full user profile after successful login
+      showMessage('Login successful!', 'success');
+    } catch (error) {
+      console.error("Login error:", error.response?.data?.message || error.message);
+      showMessage(error.response?.data?.message || 'Login failed. Please try again.', 'error');
+      setAccessToken(null);
+      setIsAuthenticated(false);
+      setAuthHeader(null);
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken'); // Ensure refresh token is cleared on login failure
+    } finally {
+      setLoadingApp(false);
+    }
+  }, [fetchUserProfile, showMessage, setAuthHeader]);
+
+  // --- END OF NECESSARY CHANGES ---
+
+  // Initial app load effect: check for dark mode and try to refresh token
+  // This useEffect now directly calls refreshAccessToken for auth check
+  React.useEffect(() => {
+    const savedDarkMode = localStorage.getItem('darkMode');
+    if (savedDarkMode !== null) {
+      setDarkMode(JSON.parse(savedDarkMode));
+    }
+    refreshAccessToken(); // Attempt to refresh token on app load
+  }, [refreshAccessToken]); // Dependency array includes refreshAccessToken
+
+  // Apply dark mode class to body
+  React.useEffect(() => {
+    if (darkMode) {
+      document.body.classList.add('dark');
+    } else {
+      document.body.classList.remove('dark');
+    }
+  }, [darkMode]);
 
   // Determine user role for conditional rendering
   const role = user?.role;
@@ -207,6 +256,8 @@ const App = () => {
     apiBaseUrl: API_BASE_URL // Pass API base URL to dashboards
     ,
     accessToken: accessToken // Pass accessToken to dashboards
+    ,
+    onProfileUpdateSuccess: fetchUserProfile // Pass the fetchUserProfile function
   })));
 };
 

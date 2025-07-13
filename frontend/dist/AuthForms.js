@@ -24,10 +24,20 @@ const AuthForms = ({
     await handleLogin(email, password); // Call the handleLogin function passed from App.jsx
   };
   return /*#__PURE__*/React.createElement("div", {
-    className: `min-h-screen flex items-center justify-center w-full p-4
+    className: `min-h-screen flex items-center justify-center w-full p-4 relative // 'relative' is still useful for context, but logos will be 'fixed'
             ${darkMode ? 'bg-gray-900' : 'bg-gradient-to-br from-blue-50 to-indigo-100'} // Lighter background gradient
-            transition-all duration-500 transform`
-  }, /*#__PURE__*/React.createElement("div", {
+            bg-cover bg-center bg-no-repeat // Keep these Tailwind classes for background behavior
+            bg-blue-100 // Fallback solid background color
+            transition-all duration-500 transform`,
+    style: {
+      backgroundImage: `url('/assets/images/beyond-bim-5.png')`
+    } // Direct inline style for background image
+  }, /*#__PURE__*/React.createElement("img", {
+    src: "/assets/images/company-logo.jpeg" // Placeholder for Company Logo
+    ,
+    alt: "Company Logo",
+    className: "fixed top-4 left-4 w-24 h-auto rounded-md shadow-lg z-50" // Changed to 'fixed', added z-index
+  }), /*#__PURE__*/React.createElement("div", {
     className: `bg-white dark:bg-gray-800 p-8 sm:p-10 rounded-xl shadow-2xl w-full max-w-md transition-all duration-500 transform ${darkMode ? 'text-white' : 'text-gray-800'} hover:scale-[1.01]`
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex justify-end mb-4"
@@ -58,6 +68,8 @@ const AuthForms = ({
     strokeWidth: 2,
     d: "M20.354 15.354A9 9 0 018.646 3.646 9.003 9003 0 0012 21a9 9 0 008.354-5.646z"
   })))), /*#__PURE__*/React.createElement("h2", {
+    className: "text-2xl sm:text-3xl font-extrabold text-center mb-2\r bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-purple-700 // ADDED GRADIENT\r "
+  }, "Beyond BIM Technologies"), /*#__PURE__*/React.createElement("h2", {
     className: "text-4xl font-extrabold text-center mb-8 text-blue-600 dark:text-blue-400"
   }, "Welcome Back!"), /*#__PURE__*/React.createElement("p", {
     className: "text-center text-gray-600 dark:text-gray-300 mb-8 text-lg"
@@ -129,7 +141,12 @@ const AuthForms = ({
   }, /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowForgotPasswordModal(true),
     className: "text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 text-sm font-medium focus:outline-none"
-  }, "Forgot Password?"))), showForgotPasswordModal && /*#__PURE__*/React.createElement("div", {
+  }, "Forgot Password?"))), /*#__PURE__*/React.createElement("img", {
+    src: "/assets/images/united-solutions-plus.jpeg" // Placeholder for Developer Logo
+    ,
+    alt: "Developer Logo",
+    className: "fixed bottom-4 right-4 w-20 h-auto rounded-md shadow-lg z-50" // Changed to 'fixed', added z-index
+  }), showForgotPasswordModal && /*#__PURE__*/React.createElement("div", {
     className: "fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50"
   }, /*#__PURE__*/React.createElement("div", {
     className: `bg-white dark:bg-gray-800 p-8 rounded-lg shadow-xl w-full max-w-md ${darkMode ? 'text-white' : 'text-gray-800'}`

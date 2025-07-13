@@ -11,7 +11,7 @@ const WeeklyOffManagement = ({
   const [allEmployees, setAllEmployees] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [selectedEmployeeId, setSelectedEmployeeId] = React.useState('');
-  const [selectedDay, setSelectedDay] = React.useState(''); // 'Monday', 'Tuesday', etc.
+  const [selectedDays, setSelectedDays] = React.useState([]); // CHANGED: Now an array for multiple selections
   const [startDate, setStartDate] = React.useState(''); // New: Start Date for weekly off
   const [endDate, setEndDate] = React.useState(''); // New: End Date for weekly off
 
@@ -62,30 +62,34 @@ const WeeklyOffManagement = ({
     }
   }, [accessToken]); // Re-fetch when accessToken changes
 
+  // NEW: Handle checkbox changes for multiple day selection
+  const handleDayChange = e => {
+    const dayValue = parseInt(e.target.value);
+    if (e.target.checked) {
+      setSelectedDays(prev => [...prev, dayValue].sort((a, b) => a - b)); // Add and sort
+    } else {
+      setSelectedDays(prev => prev.filter(day => day !== dayValue)); // Remove
+    }
+  };
   const handleAddWeeklyOff = async e => {
     e.preventDefault();
-    if (!selectedEmployeeId || !selectedDay || !startDate) {
-      // endDate is now optional on backend
-      showMessage('Please select an employee, a day, and a start date for the weekly off.', 'error');
-      return;
-    }
-    const dayNumber = dayNameToNumber[selectedDay];
-    if (dayNumber === undefined) {
-      showMessage('Invalid day selected.', 'error');
+    if (!selectedEmployeeId || selectedDays.length === 0 || !startDate) {
+      // Check if selectedDays array is not empty
+      showMessage('Please select an employee, at least one day, and a start date for the weekly off.', 'error');
       return;
     }
     try {
       await authAxios.post(`${apiBaseUrl}/api/admin/weekly-offs`, {
         user_id: selectedEmployeeId,
-        weekly_off_days: [dayNumber],
-        // Send as an array of numbers
+        weekly_off_days: selectedDays,
+        // CHANGED: Send the array of selected days
         effective_date: startDate,
         // Use startDate as effective_date
         end_date: endDate || null // Send endDate if present, otherwise null
       });
       showMessage('Weekly off added successfully!', 'success');
       setSelectedEmployeeId('');
-      setSelectedDay('');
+      setSelectedDays([]); // Clear selected days after successful add
       setStartDate(''); // Clear dates after successful add
       setEndDate(''); // Clear dates after successful add
       fetchWeeklyOffsAndEmployees(); // Re-fetch to update the list
@@ -146,20 +150,22 @@ const WeeklyOffManagement = ({
     key: emp.id,
     value: emp.id
   }, emp.name, " (", emp.employee_id, ")")))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
-    htmlFor: "daySelect",
     className: "block text-sm font-medium text-gray-700 dark:text-gray-300"
-  }, "Day of Week"), /*#__PURE__*/React.createElement("select", {
-    id: "daySelect",
-    className: "mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm",
-    value: selectedDay,
-    onChange: e => setSelectedDay(e.target.value),
-    required: true
-  }, /*#__PURE__*/React.createElement("option", {
-    value: ""
-  }, "Select Day"), daysOfWeek.map(day => /*#__PURE__*/React.createElement("option", {
-    key: day,
-    value: day
-  }, day)))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+  }, "Day(s) of Week"), /*#__PURE__*/React.createElement("div", {
+    className: "mt-1 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2"
+  }, " ", daysOfWeek.map((dayName, index) => /*#__PURE__*/React.createElement("label", {
+    key: index,
+    className: "inline-flex items-center"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    value: index // Day number (0-6)
+    ,
+    checked: selectedDays.includes(index),
+    onChange: handleDayChange,
+    className: "form-checkbox h-5 w-5 text-blue-600 rounded"
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "ml-2 text-gray-700 dark:text-gray-300"
+  }, dayName))))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     htmlFor: "startDate",
     className: "block text-sm font-medium text-gray-700 dark:text-gray-300"
   }, "Effective Date"), /*#__PURE__*/React.createElement("input", {

@@ -7,7 +7,7 @@ const ProfileSettings = ({
   apiBaseUrl,
   accessToken
 }) => {
-  // Removed onUserUpdate prop
+  // Existing states
   const [name, setName] = React.useState(user?.name || '');
   const [email, setEmail] = React.useState(user?.email || '');
   const [employeeId, setEmployeeId] = React.useState(user?.employee_id || '');
@@ -20,6 +20,17 @@ const ProfileSettings = ({
   const [confirmNewPassword, setConfirmNewPassword] = React.useState('');
   const [photoFile, setPhotoFile] = React.useState(null);
 
+  // NEW STATES for additional profile fields
+  const [panCardNumber, setPanCardNumber] = React.useState(user?.pan_card_number || '');
+  const [bankAccountNumber, setBankAccountNumber] = React.useState(user?.bank_account_number || '');
+  const [ifscCode, setIfscCode] = React.useState(user?.ifsc_code || '');
+  const [bankName, setBankName] = React.useState(user?.bank_name || '');
+  // Ensure date_of_birth is formatted correctly for input type="date"
+  const [dateOfBirth, setDateOfBirth] = React.useState(user?.date_of_birth ? moment(user.date_of_birth).format('YYYY-MM-DD') : '');
+  const [personalDetails, setPersonalDetails] = React.useState(user?.personal_details || ''); // New state for personal details
+  const [familyHistory, setFamilyHistory] = React.useState(user?.family_history || ''); // New state for family history
+  const [profileUpdateReason, setProfileUpdateReason] = React.useState(''); // Reason for profile update request
+
   // Axios instance with token for authenticated requests
   const authAxios = axios.create({
     baseURL: apiBaseUrl,
@@ -31,6 +42,8 @@ const ProfileSettings = ({
   // Update state if user prop changes (e.g., after initial load or re-login)
   React.useEffect(() => {
     if (user) {
+      // These fields are now read-only, but we still initialize their states
+      // to display the current user data.
       setName(user.name || '');
       setEmail(user.email || '');
       setEmployeeId(user.employee_id || '');
@@ -38,29 +51,47 @@ const ProfileSettings = ({
       setMobileNumber(user.mobile_number || '');
       setKycDetails(user.kyc_details || '');
       setProfilePhoto(user.profile_photo || null);
+      // Update new states from user prop
+      setPanCardNumber(user.pan_card_number || '');
+      setBankAccountNumber(user.bank_account_number || '');
+      setIfscCode(user.ifsc_code || '');
+      setBankName(user.bank_name || '');
+      setDateOfBirth(user.date_of_birth ? moment(user.date_of_birth).format('YYYY-MM-DD') : '');
+      setPersonalDetails(user.personal_details || ''); // Initialize new state
+      setFamilyHistory(user.family_history || ''); // Initialize new state
     }
   }, [user]);
   const handleProfileUpdateRequest = async e => {
-    // Renamed function
     e.preventDefault();
+    if (!profileUpdateReason.trim()) {
+      showMessage('Please provide a reason for your profile update request.', 'error');
+      return;
+    }
     try {
       // Construct payload with proposed changes
+      // ONLY include fields that are meant for employee-initiated update requests (non-sensitive ones like name, email, employee_id are excluded)
       const requestedChanges = {
-        name: name,
-        email: email,
-        employee_id: employeeId,
         address: address || null,
         mobile_number: mobileNumber || null,
-        kyc_details: kycDetails || null
+        kyc_details: kycDetails || null,
+        pan_card_number: panCardNumber || null,
+        bank_account_number: bankAccountNumber || null,
+        ifsc_code: ifscCode || null,
+        bank_name: bankName || null,
+        date_of_birth: dateOfBirth || null,
+        personal_details: personalDetails || null,
+        // Include new state
+        family_history: familyHistory || null // Include new state
       };
 
-      // Send request to a new backend endpoint for profile update approval
-      await authAxios.post(`${apiBaseUrl}/api/profile-update-requests`, {
-        requested_data: requestedChanges // Send all updated fields
+      // Send request to the backend endpoint for profile update approval
+      await authAxios.post(`${apiBaseUrl}/api/employee/profile-update-request`, {
+        requested_data: requestedChanges,
+        reason: profileUpdateReason // Include the reason
       });
       showMessage('Profile update request submitted for admin approval!', 'success');
-      // Clear photo file state after submission
-      setPhotoFile(null);
+      setProfileUpdateReason(''); // Clear the reason field after submission
+      setPhotoFile(null); // Clear the selected file after upload (if any)
 
       // Note: The user's profile on the frontend will NOT immediately reflect these changes
       // because they are pending admin approval. The 'user' prop will only update
@@ -102,16 +133,6 @@ const ProfileSettings = ({
   const handlePhotoChange = e => {
     if (e.target.files && e.target.files[0]) {
       setPhotoFile(e.target.files[0]);
-      // For now, photo upload is still direct. If photo also needs approval,
-      // it would need to be part of the requested_data JSONB in the backend.
-      // For simplicity, we'll assume photo updates are immediate or handled separately.
-      // If photo also needs approval, it would be a more complex change.
-      // For now, if a photo is selected, we could trigger an immediate upload or
-      // include its base64/URL in the requested_data. For this iteration,
-      // we'll keep photo upload as a separate, direct action for simplicity
-      // or assume it's handled by a different flow if approval is needed.
-      // For now, I'll remove the direct photo upload from here to align with approval flow.
-      // If photo changes also need approval, they should be part of the requested_data.
     }
   };
   const handlePhotoUpload = async () => {
@@ -142,7 +163,7 @@ const ProfileSettings = ({
   }, "Update Your Profile"), /*#__PURE__*/React.createElement("form", {
     onSubmit: handleProfileUpdateRequest,
     className: "space-y-4"
-  }, " ", /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center space-x-4"
   }, profilePhoto ? /*#__PURE__*/React.createElement("img", {
     src: profilePhoto,
@@ -172,30 +193,27 @@ const ProfileSettings = ({
   }, "Name"), /*#__PURE__*/React.createElement("input", {
     type: "text",
     id: "name",
-    className: "mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm",
+    className: "mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white sm:text-sm",
     value: name,
-    onChange: e => setName(e.target.value),
-    required: true
+    readOnly: true
   })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     htmlFor: "email",
     className: "block text-sm font-medium text-gray-700 dark:text-gray-300"
   }, "Email"), /*#__PURE__*/React.createElement("input", {
     type: "email",
     id: "email",
-    className: "mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm",
+    className: "mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white sm:text-sm",
     value: email,
-    onChange: e => setEmail(e.target.value),
-    required: true
+    readOnly: true
   })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     htmlFor: "employeeId",
     className: "block text-sm font-medium text-gray-700 dark:text-gray-300"
   }, "Employee ID"), /*#__PURE__*/React.createElement("input", {
     type: "text",
     id: "employeeId",
-    className: "mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm",
+    className: "mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white sm:text-sm",
     value: employeeId,
-    onChange: e => setEmployeeId(e.target.value),
-    required: true
+    readOnly: true
   })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     htmlFor: "address",
     className: "block text-sm font-medium text-gray-700 dark:text-gray-300"
@@ -223,6 +241,79 @@ const ProfileSettings = ({
     className: "mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm",
     value: kycDetails,
     onChange: e => setKycDetails(e.target.value)
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    htmlFor: "panCardNumber",
+    className: "block text-sm font-medium text-gray-700 dark:text-gray-300"
+  }, "PAN Card Number"), /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    id: "panCardNumber",
+    className: "mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm",
+    value: panCardNumber,
+    onChange: e => setPanCardNumber(e.target.value)
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    htmlFor: "bankAccountNumber",
+    className: "block text-sm font-medium text-gray-700 dark:text-gray-300"
+  }, "Bank Account Number"), /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    id: "bankAccountNumber",
+    className: "mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm",
+    value: bankAccountNumber,
+    onChange: e => setBankAccountNumber(e.target.value)
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    htmlFor: "ifscCode",
+    className: "block text-sm font-medium text-gray-700 dark:text-gray-300"
+  }, "IFSC Code"), /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    id: "ifscCode",
+    className: "mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm",
+    value: ifscCode,
+    onChange: e => setIfscCode(e.target.value)
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    htmlFor: "bankName",
+    className: "block text-sm font-medium text-gray-700 dark:text-gray-300"
+  }, "Bank Name"), /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    id: "bankName",
+    className: "mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm",
+    value: bankName,
+    onChange: e => setBankName(e.target.value)
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    htmlFor: "dateOfBirth",
+    className: "block text-sm font-medium text-gray-700 dark:text-gray-300"
+  }, "Date of Birth"), /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    id: "dateOfBirth",
+    className: "mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm",
+    value: dateOfBirth,
+    onChange: e => setDateOfBirth(e.target.value)
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    htmlFor: "personalDetails",
+    className: "block text-sm font-medium text-gray-700 dark:text-gray-300"
+  }, "Personal Details"), /*#__PURE__*/React.createElement("textarea", {
+    id: "personalDetails",
+    rows: "2",
+    className: "mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm",
+    value: personalDetails,
+    onChange: e => setPersonalDetails(e.target.value)
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    htmlFor: "familyHistory",
+    className: "block text-sm font-medium text-gray-700 dark:text-gray-300"
+  }, "Family History"), /*#__PURE__*/React.createElement("textarea", {
+    id: "familyHistory",
+    rows: "2",
+    className: "mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm",
+    value: familyHistory,
+    onChange: e => setFamilyHistory(e.target.value)
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    htmlFor: "profileUpdateReason",
+    className: "block text-sm font-medium text-gray-700 dark:text-gray-300"
+  }, "Reason for Update Request"), /*#__PURE__*/React.createElement("textarea", {
+    id: "profileUpdateReason",
+    rows: "3",
+    className: "mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm",
+    value: profileUpdateReason,
+    onChange: e => setProfileUpdateReason(e.target.value),
+    required: true
   })), /*#__PURE__*/React.createElement("button", {
     type: "submit",
     className: "px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200 shadow-md"
@@ -266,3 +357,6 @@ const ProfileSettings = ({
     className: "px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200 shadow-md"
   }, "Change Password")));
 };
+
+// Make the component globally accessible
+window.ProfileSettings = ProfileSettings;

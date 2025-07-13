@@ -46,43 +46,43 @@ const AdminNotifications = ({
     }, [accessToken, apiBaseUrl]); // Added apiBaseUrl to dependency array
 
     const handleSendNotification = async e => {
-    e.preventDefault();
+    e.preventDefault();
 
-    if (!notificationMessage.trim()) {
-        showMessage('Notification message cannot be empty.', 'error');
-        return;
-    }
+    if (!notificationMessage.trim()) {
+        showMessage('Notification message cannot be empty.', 'error');
+        return;
+    }
 
-    let endpoint = '';
-    let payload = {
-        message: notificationMessage
-    };
+    let endpoint = '';
+    let payload = {
+        message: notificationMessage
+    };
 
-    if (notificationType === 'global') {
-        endpoint = `${apiBaseUrl}/api/admin/notifications/global`;
-    } else { // 'specific'
-        if (!selectedEmployeeId) {
-            showMessage('Please select an employee for specific notification.', 'error');
-            return;
-        }
-        endpoint = `${apiBaseUrl}/api/admin/notifications/send`;
-        // CHANGE THIS LINE:
-        payload.userId = selectedEmployeeId; // Changed from user_id to userId to match backend
-    }
+    if (notificationType === 'global') {
+        // CORRECTED: Removed '/api' prefix from the global notification endpoint
+        endpoint = `${apiBaseUrl}/admin/notifications/global`;
+    } else { // 'specific'
+        if (!selectedEmployeeId) {
+            showMessage('Please select an employee for specific notification.', 'error');
+            return;
+        }
+        endpoint = `${apiBaseUrl}/api/admin/notifications/send`;
+        payload.userId = selectedEmployeeId; // Changed from user_id to userId to match backend
+    }
 
-    setSendingNotification(true);
-    try {
-        await authAxios.post(endpoint, payload);
-        showMessage('Notification sent successfully!', 'success');
-        setNotificationMessage('');
-        setSelectedEmployeeId('');
-        setNotificationType('global');
-    } catch (error) {
-        console.error("Error sending notification:", error.response?.data?.message || error.message);
-        showMessage(`Failed to send notification: ${error.response?.data?.message || error.message}`, 'error');
-    } finally {
-        setSendingNotification(false);
-    }
+    setSendingNotification(true);
+    try {
+        await authAxios.post(endpoint, payload);
+        showMessage('Notification sent successfully!', 'success');
+        setNotificationMessage('');
+        setSelectedEmployeeId('');
+        setNotificationType('global');
+    } catch (error) {
+        console.error("Error sending notification:", error.response?.data?.message || error.message);
+        showMessage(`Failed to send notification: ${error.response?.data?.message || error.message}`, 'error');
+    } finally {
+        setSendingNotification(false);
+    }
 };
 
     // Loading state UI

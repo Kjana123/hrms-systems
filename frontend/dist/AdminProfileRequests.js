@@ -14,6 +14,8 @@ const AdminProfileRequests = ({
   const [selectedRequestId, setSelectedRequestId] = React.useState(null); // For modal context
   const [showRejectModal, setShowRejectModal] = React.useState(false);
   const [rejectReason, setRejectReason] = React.useState('');
+  const [showViewDetailsModal, setShowViewDetailsModal] = React.useState(false); // New state for viewing full request details
+  const [viewingRequestDetails, setViewingRequestDetails] = React.useState(null); // State to hold request data for detail view
 
   // Axios instance with token for authenticated requests
   const authAxios = axios.create({
@@ -23,12 +25,13 @@ const AdminProfileRequests = ({
     }
   });
 
-  // Function to fetch pending profile update requests
+  // Function to fetch profile update requests
   const fetchProfileRequests = async () => {
     setLoading(true);
     setError(null);
     try {
-      console.log("[AdminProfileRequests] Fetching pending profile update requests...");
+      console.log("[AdminProfileRequests] Fetching profile update requests...");
+      // Fetch all requests, the backend can filter by status if a 'status' query param is sent
       const response = await authAxios.get('/api/admin/profile-update-requests');
       setRequests(response.data);
       console.log("[AdminProfileRequests] Fetched requests:", response.data);
@@ -43,12 +46,15 @@ const AdminProfileRequests = ({
 
   // Handle approving a request
   const handleApprove = async requestId => {
-    // IMPORTANT: Use a custom modal or component for confirmation, not window.confirm
-    if (!window.confirm('Are you sure you want to approve this profile update request?')) {
+    // IMPORTANT: In a production app, replace window.confirm with a custom modal for better UX.
+    if (!window.confirm('Are you sure you want to approve this profile update request? This will update the employee\'s profile directly.')) {
       return;
     }
     try {
       console.log(`[AdminProfileRequests] Approving request ID: ${requestId}`);
+      // The backend /approve endpoint currently doesn't expect an admin_comment in the body,
+      // but if you add it to your backend, you can pass it here:
+      // await authAxios.post(`/api/admin/profile-update-requests/${requestId}/approve`, { admin_comment: 'Approved by admin' });
       await authAxios.post(`/api/admin/profile-update-requests/${requestId}/approve`);
       showMessage('Profile update request approved successfully!', 'success');
       fetchProfileRequests(); // Re-fetch to update the list
@@ -82,6 +88,12 @@ const AdminProfileRequests = ({
       showMessage(err.response?.data?.message || 'Failed to reject request.', 'error');
     }
   };
+
+  // Function to open the detailed view modal
+  const handleViewDetailsClick = request => {
+    setViewingRequestDetails(request);
+    setShowViewDetailsModal(true);
+  };
   React.useEffect(() => {
     fetchProfileRequests();
   }, [apiBaseUrl, accessToken]); // Re-fetch when API base URL or token changes
@@ -105,9 +117,9 @@ const AdminProfileRequests = ({
     className: `p-6 rounded-lg shadow-md ${darkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'}`
   }, /*#__PURE__*/React.createElement("h2", {
     className: "text-2xl font-bold mb-6"
-  }, "Pending Profile Update Requests"), requests.length === 0 ? /*#__PURE__*/React.createElement("p", {
+  }, "Profile Update Requests"), requests.length === 0 ? /*#__PURE__*/React.createElement("p", {
     className: `text-center py-8 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`
-  }, "No pending profile update requests found.") : /*#__PURE__*/React.createElement("div", {
+  }, "No profile update requests found.") : /*#__PURE__*/React.createElement("div", {
     className: "overflow-x-auto rounded-lg shadow-md"
   }, /*#__PURE__*/React.createElement("table", {
     className: `min-w-full divide-y ${darkMode ? 'divide-gray-700' : 'divide-gray-200'}`
@@ -117,13 +129,13 @@ const AdminProfileRequests = ({
     className: `px-6 py-3 text-left text-xs font-medium ${darkMode ? 'text-gray-300' : 'text-gray-500'} uppercase tracking-wider`
   }, "Request ID"), /*#__PURE__*/React.createElement("th", {
     className: `px-6 py-3 text-left text-xs font-medium ${darkMode ? 'text-gray-300' : 'text-gray-500'} uppercase tracking-wider`
-  }, "User Name"), /*#__PURE__*/React.createElement("th", {
+  }, "Employee Name (ID)"), /*#__PURE__*/React.createElement("th", {
     className: `px-6 py-3 text-left text-xs font-medium ${darkMode ? 'text-gray-300' : 'text-gray-500'} uppercase tracking-wider`
-  }, "User Email"), /*#__PURE__*/React.createElement("th", {
-    className: `px-6 py-3 text-left text-xs font-medium ${darkMode ? 'text-gray-300' : 'text-gray-500'} uppercase tracking-wider`
-  }, "Requested Data"), /*#__PURE__*/React.createElement("th", {
+  }, "Status"), /*#__PURE__*/React.createElement("th", {
     className: `px-6 py-3 text-left text-xs font-medium ${darkMode ? 'text-gray-300' : 'text-gray-500'} uppercase tracking-wider`
   }, "Requested At"), /*#__PURE__*/React.createElement("th", {
+    className: `px-6 py-3 text-left text-xs font-medium ${darkMode ? 'text-gray-300' : 'text-gray-500'} uppercase tracking-wider`
+  }, "Reviewed By"), /*#__PURE__*/React.createElement("th", {
     className: `px-6 py-3 text-left text-xs font-medium ${darkMode ? 'text-gray-300' : 'text-gray-500'} uppercase tracking-wider`
   }, "Actions"))), /*#__PURE__*/React.createElement("tbody", {
     className: `${darkMode ? 'bg-gray-800 divide-gray-700' : 'bg-white divide-gray-200'} divide-y`
@@ -134,25 +146,26 @@ const AdminProfileRequests = ({
     className: `px-6 py-4 whitespace-nowrap text-sm font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`
   }, request.id), /*#__PURE__*/React.createElement("td", {
     className: `px-6 py-4 whitespace-nowrap text-sm ${darkMode ? 'text-gray-300' : 'text-gray-500'}`
-  }, request.user_name), /*#__PURE__*/React.createElement("td", {
-    className: `px-6 py-4 whitespace-nowrap text-sm ${darkMode ? 'text-gray-300' : 'text-gray-500'}`
-  }, request.user_email), /*#__PURE__*/React.createElement("td", {
-    className: `px-6 py-4 text-sm ${darkMode ? 'text-gray-300' : 'text-gray-500'}`
-  }, /*#__PURE__*/React.createElement("pre", {
-    className: "whitespace-pre-wrap text-xs rounded-md p-2 bg-gray-100 dark:bg-gray-700 overflow-auto max-h-24"
-  }, JSON.stringify(request.requested_data, null, 2))), /*#__PURE__*/React.createElement("td", {
+  }, request.user_name, " (", request.employee_id, ")"), /*#__PURE__*/React.createElement("td", {
+    className: `px-6 py-4 whitespace-nowrap text-sm font-semibold ${request.status === 'pending' ? 'text-yellow-600 dark:text-yellow-400' : request.status === 'approved' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`
+  }, request.status.toUpperCase()), /*#__PURE__*/React.createElement("td", {
     className: `px-6 py-4 whitespace-nowrap text-sm ${darkMode ? 'text-gray-300' : 'text-gray-500'}`
   }, moment(request.requested_at).format('YYYY-MM-DD hh:mm A')), /*#__PURE__*/React.createElement("td", {
+    className: `px-6 py-4 whitespace-nowrap text-sm ${darkMode ? 'text-gray-300' : 'text-gray-500'}`
+  }, request.reviewed_by_admin_name || 'N/A', request.reviewed_at && ` (${moment(request.reviewed_at).format('YYYY-MM-DD hh:mm A')})`), /*#__PURE__*/React.createElement("td", {
     className: "px-6 py-4 whitespace-nowrap text-sm font-medium"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "flex space-x-2"
   }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => handleViewDetailsClick(request),
+    className: "text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300 mr-4"
+  }, "View Details"), request.status === 'pending' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
     onClick: () => handleApprove(request.id),
-    className: "px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200 shadow-sm"
+    className: "px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors duration-200 shadow-sm mr-2"
   }, "Approve"), /*#__PURE__*/React.createElement("button", {
     onClick: () => handleRejectClick(request.id),
     className: "px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors duration-200 shadow-sm"
-  }, "Reject")))))))), showRejectModal && /*#__PURE__*/React.createElement("div", {
+  }, "Reject")), (request.status === 'approved' || request.status === 'rejected') && /*#__PURE__*/React.createElement("span", {
+    className: "text-gray-500 dark:text-gray-400"
+  }, "Reviewed"))))))), showRejectModal && /*#__PURE__*/React.createElement("div", {
     className: "fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-50"
   }, /*#__PURE__*/React.createElement("div", {
     className: `p-6 rounded-lg shadow-xl w-full max-w-md ${darkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'}`
@@ -174,7 +187,30 @@ const AdminProfileRequests = ({
   }, "Cancel"), /*#__PURE__*/React.createElement("button", {
     onClick: handleRejectConfirm,
     className: "px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
-  }, "Confirm Reject")))));
+  }, "Confirm Reject")))), showViewDetailsModal && viewingRequestDetails && /*#__PURE__*/React.createElement("div", {
+    className: "fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-50"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: `p-6 rounded-lg shadow-xl w-full max-w-lg ${darkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'}`
+  }, /*#__PURE__*/React.createElement("h3", {
+    className: "text-xl font-bold mb-4"
+  }, "Profile Update Request Details (ID: ", viewingRequestDetails.id, ")"), /*#__PURE__*/React.createElement("div", {
+    className: "space-y-3 text-sm"
+  }, /*#__PURE__*/React.createElement("p", null, /*#__PURE__*/React.createElement("strong", null, "Employee:"), " ", viewingRequestDetails.user_name, " (", viewingRequestDetails.employee_id, ")"), /*#__PURE__*/React.createElement("p", null, /*#__PURE__*/React.createElement("strong", null, "Requested At:"), " ", moment(viewingRequestDetails.requested_at).format('YYYY-MM-DD hh:mm A')), /*#__PURE__*/React.createElement("p", null, /*#__PURE__*/React.createElement("strong", null, "Status:"), " ", /*#__PURE__*/React.createElement("span", {
+    className: `font-semibold ${viewingRequestDetails.status === 'pending' ? 'text-yellow-600 dark:text-yellow-400' : viewingRequestDetails.status === 'approved' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`
+  }, viewingRequestDetails.status.toUpperCase())), viewingRequestDetails.reason && /*#__PURE__*/React.createElement("p", null, /*#__PURE__*/React.createElement("strong", null, "Employee Reason:"), " ", /*#__PURE__*/React.createElement("span", {
+    className: "italic"
+  }, viewingRequestDetails.reason)), viewingRequestDetails.admin_comment && /*#__PURE__*/React.createElement("p", null, /*#__PURE__*/React.createElement("strong", null, "Admin Comment:"), " ", /*#__PURE__*/React.createElement("span", {
+    className: "italic"
+  }, viewingRequestDetails.admin_comment)), viewingRequestDetails.reviewed_by_admin_name && /*#__PURE__*/React.createElement("p", null, /*#__PURE__*/React.createElement("strong", null, "Reviewed By:"), " ", viewingRequestDetails.reviewed_by_admin_name, " on ", moment(viewingRequestDetails.reviewed_at).format('YYYY-MM-DD hh:mm A')), /*#__PURE__*/React.createElement("h4", {
+    className: "font-semibold mt-4 mb-2"
+  }, "Requested Changes:"), /*#__PURE__*/React.createElement("pre", {
+    className: "whitespace-pre-wrap text-xs rounded-md p-2 bg-gray-100 dark:bg-gray-700 overflow-auto max-h-48"
+  }, JSON.stringify(viewingRequestDetails.requested_data, null, 2))), /*#__PURE__*/React.createElement("div", {
+    className: "flex justify-end space-x-4 mt-6"
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowViewDetailsModal(false),
+    className: `px-4 py-2 rounded-md ${darkMode ? 'bg-gray-600 hover:bg-gray-700 text-white' : 'bg-gray-300 hover:bg-gray-400 text-gray-800'}`
+  }, "Close")))));
 };
 
 // Make the component globally accessible
