@@ -87,8 +87,8 @@ app.use(cors({
 // --- PRODUCTION DEPLOYMENT STATIC FILE SERVING ---
 // Define the path to your frontend's *built* output directory.
 // This assumes your frontend's build output is in 'hrms-website/frontend/build'.
-const frontendBuildPath = path.join(__dirname, '../frontend', 'build');
-console.log('Serving production frontend build from:', frontendBuildPath); // For debugging on Render
+const frontendBuildPath = path.join(__dirname, '../frontend', 'dist');
+console.log('Serving frontend static files from:', frontendBuildPath); // Updated log message for clarity
 
 // Serve all static files (HTML, CSS, JS, images, etc.) from the frontend's build directory.
 // This is the primary static file server for your deployed frontend.
