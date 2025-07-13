@@ -3,10 +3,11 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "transpile-js": "babel src --out-dir dist --extensions \".js\"",
-    "build": "npm run transpile-js && cp index.prod.html dist/index.html && cp index.css dist/index.css",
-     "render-build": "npm run build"
-  },
+  "transpile-js": "babel src --out-dir dist --extensions \".js\"",
+   "build": "shx rm -rf dist && shx mkdir -p dist/assets/images && npm run transpile-js && shx cp index.prod.html dist/index.html && shx cp index.css dist/index.css && shx cp -r public/assets/images dist/assets/",
+  "start": "live-server --port=3000 --entry-file=index.html",
+  "test": "echo \"Error: no test specified\" && exit 1"
+},
   "keywords": [],
   "author": "",
   "license": "ISC",
@@ -14,6 +15,7 @@
   "devDependencies": {
     "@babel/cli": "^7.28.0",
     "@babel/core": "^7.28.0",
-    "@babel/preset-react": "^7.27.1"
+    "@babel/preset-react": "^7.27.1",
+    "shx": "^0.4.0"
   }
 }
