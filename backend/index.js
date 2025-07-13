@@ -84,23 +84,29 @@ app.use(cors({
 }));
 
 
-// --- PRODUCTION DEPLOYMENT STATIC FILE SERVING ---
-// Define the path to your frontend's *built* output directory.
-// This assumes your frontend's build output is in 'hrms-website/frontend/build'.
-const frontendBuildPath = path.join(__dirname, '../frontend', 'dist');
-console.log('Serving frontend static files from:', frontendBuildPath); // Updated log message for clarity
+// --- CRITICAL FIX: FRONTEND STATIC FILE SERVING AND CATCH-ALL ROUTE ---
+// These lines MUST be at the very end of your index.js file,
+// AFTER all your API routes (e.g., app.get('/api/...'), app.post('/admin/...'), etc.).
+// This ensures that API requests are handled by your API endpoints first.
 
-// Serve all static files (HTML, CSS, JS, images, etc.) from the frontend's build directory.
+// Define the path to your frontend's *built* output directory.
+// This assumes your frontend's build output is in 'hrms-website/frontend/dist'.
+const frontendBuildPath = path.join(__dirname, '../frontend', 'dist');
+console.log('Serving frontend static files from:', frontendBuildPath); // Log for debugging
+
+// Serve all static files (HTML, CSS, JS, images, etc.) from the frontend's dist directory.
 // This is the primary static file server for your deployed frontend.
 app.use(express.static(frontendBuildPath));
 
-// For Single Page Applications (SPAs), any route that isn't an API route
-// should fall back to serving index.html. This is crucial for client-side routing
-// (e.g., if a user directly accesses /dashboard or refreshes the page on a sub-route).
+// Catch-all route: For any requests not handled by API routes or other specific static files,
+// serve the frontend's index.html. This is essential for Single Page Application (SPA)
+// routing, allowing users to refresh pages or access direct URLs within your React app.
 app.get('*', (req, res) => {
-    res.sendFile(path.join(frontendBuildPath, 'index.html'));
+    const indexPath = path.join(frontendBuildPath, 'index.html');
+    console.log('Attempting to send index.html from catch-all route:', indexPath);
+    res.sendFile(indexPath);
 });
-// --- END PRODUCTION DEPLOYMENT STATIC FILE SERVING ---
+// --- END CRITICAL FIX ----
 
 // Serve static profile photos
 app.use('/uploads/profile_photos', express.static('uploads/profile_photos'));
