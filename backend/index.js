@@ -30,12 +30,13 @@ const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET;
 
 // PostgreSQL Pool Configuration - Now using DATABASE_URL
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false // Required for some cloud providers like Neon
-  }
+    connectionString: process.env.DATABASE_URL,
+    // CRITICAL FIX: Make SSL conditional based on environment
+    // Use SSL with rejectUnauthorized: false for production (e.g., Render, Neon)
+    // Disable SSL (set to false) for local development where SSL might not be configured.
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
-
+ 
 // Configure multer for file uploads (user photos)
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
