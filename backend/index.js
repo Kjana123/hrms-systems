@@ -91,22 +91,6 @@ app.use(cors({
 
 // Define the path to your frontend's *built* output directory.
 // This assumes your frontend's build output is in 'hrms-website/frontend/dist'.
-const frontendBuildPath = path.join(__dirname, '../frontend', 'dist');
-console.log('Serving frontend static files from:', frontendBuildPath); // Log for debugging
-
-// Serve all static files (HTML, CSS, JS, images, etc.) from the frontend's dist directory.
-// This is the primary static file server for your deployed frontend.
-app.use(express.static(frontendBuildPath));
-
-// Catch-all route: For any requests not handled by API routes or other specific static files,
-// serve the frontend's index.html. This is essential for Single Page Application (SPA)
-// routing, allowing users to refresh pages or access direct URLs within your React app.
-app.get('*', (req, res) => {
-    const indexPath = path.join(frontendBuildPath, 'index.html');
-    console.log('Attempting to send index.html from catch-all route:', indexPath);
-    res.sendFile(indexPath);
-});
-// --- END CRITICAL FIX ----
 
 // Serve static profile photos
 app.use('/uploads/profile_photos', express.static('uploads/profile_photos'));
@@ -4833,6 +4817,24 @@ app.use((err, req, res, next) => {
   }
   res.status(500).json({ message: 'Internal server error.' });
 });
+
+const frontendBuildPath = path.join(__dirname, '../frontend', 'dist');
+console.log('Serving frontend static files from:', frontendBuildPath); // Log for debugging
+
+// Serve all static files (HTML, CSS, JS, images, etc.) from the frontend's dist directory.
+// This is the primary static file server for your deployed frontend.
+app.use(express.static(frontendBuildPath));
+
+// Catch-all route: For any requests not handled by API routes or other specific static files,
+// serve the frontend's index.html. This is essential for Single Page Application (SPA)
+// routing, allowing users to refresh pages or access direct URLs within your React app.
+app.get('*', (req, res) => {
+    const indexPath = path.join(frontendBuildPath, 'index.html');
+    console.log('Attempting to send index.html from catch-all route:', indexPath);
+    res.sendFile(indexPath);
+});
+// --- END CRITICAL FIX ----
+
 
 // Start Server
 const PORT = process.env.PORT || 3001;
