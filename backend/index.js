@@ -4126,6 +4126,7 @@ app.post('/api/admin/payroll/run', authenticate, authorizeAdmin, async (req, res
             let otherEarningsParsed = {};
             if (salaryStructure.other_earnings) {
                 try {
+                    // Assuming other_earnings is already a parsed JSON object or similar
                     otherEarningsParsed = salaryStructure.other_earnings;
                     for (const key in otherEarningsParsed) {
                         grossEarnings += (parseFloat(otherEarningsParsed[key]) || 0) * proRataFactor;
@@ -4141,11 +4142,11 @@ app.post('/api/admin/payroll/run', authenticate, authorizeAdmin, async (req, res
             let epfEmployee = 0;
             let epfEmployer = 0;
             let esiEmployee = 0;
-            let esiEmployer = 0;
+            let esiEmployer = 0; // Initialize esiEmployer here
             let professionalTax = 0;
             let tds = 0;
             let loanDeduction = 0;
-            let mediclaimDeduction = parseFloat(salaryStructure.mediclaim_deduction_amount || 0); // NEW: Get mediclaim deduction
+            let mediclaimDeduction = parseFloat(salaryStructure.mediclaim_deduction_amount || 0); // Get mediclaim deduction
             let otherDeductions = {};
 
             // EPF Calculation (Employee & Employer Share)
@@ -4157,9 +4158,14 @@ app.post('/api/admin/payroll/run', authenticate, authorizeAdmin, async (req, res
             // ESI Calculation
             if (grossEarnings <= ESI_WAGE_LIMIT) {
                 esiEmployee = grossEarnings * ESI_EMPLOYEE_RATE;
-                esiEmployer = grossEarnings * ESI_EMPLOYER_RATE;
+                esiEmployer = grossEarnings * ESI_EMPLOYER_RATE; // This is the correct esiEmployer
                 totalDeductions += esiEmployee;
+            } else {
+                // If grossEarnings exceeds limit, ESI contributions are 0
+                esiEmployee = 0;
+                esiEmployer = 0;
             }
+
 
             // Professional Tax Calculation (from professional_tax_slabs table)
             if (grossEarnings > 0) {
@@ -4192,7 +4198,7 @@ app.post('/api/admin/payroll/run', authenticate, authorizeAdmin, async (req, res
             loanDeduction = 0; // Example: fetch from a 'employee_loans' table
             totalDeductions += loanDeduction;
 
-            totalDeductions += mediclaimDeduction; // NEW: Add mediclaim deduction to total deductions
+            totalDeductions += mediclaimDeduction; // Add mediclaim deduction to total deductions
 
             // 5. Net Pay Calculation
             let netPay = grossEarnings - totalDeductions;
@@ -4209,11 +4215,11 @@ app.post('/api/admin/payroll/run', authenticate, authorizeAdmin, async (req, res
             epfEmployee = parseFloat(epfEmployee.toFixed(2));
             epfEmployer = parseFloat(epfEmployer.toFixed(2));
             esiEmployee = parseFloat(esiEmployee.toFixed(2));
-            esiEmployer = parseFloat(esiEmployer.toFixed(2));
+            esiEmployer = parseFloat(esiEmployer.toFixed(2)); // Ensure esiEmployer is rounded here
             professionalTax = parseFloat(professionalTax.toFixed(2));
             tds = parseFloat(tds.toFixed(2));
             loanDeduction = parseFloat(loanDeduction.toFixed(2));
-            mediclaimDeduction = parseFloat(mediclaimDeduction.toFixed(2)); // NEW: Round mediclaim deduction
+            mediclaimDeduction = parseFloat(mediclaimDeduction.toFixed(2));
             netPay = parseFloat(netPay.toFixed(2));
 
             // Construct payslip data object for PDF generation
@@ -4241,11 +4247,11 @@ app.post('/api/admin/payroll/run', authenticate, authorizeAdmin, async (req, res
                 epfEmployee,
                 epfEmployer,
                 esiEmployee,
-                esiEmployer,
+                esiEmployer, // Use the calculated esiEmployer here
                 professionalTax,
                 tds,
                 loanDeduction,
-                mediclaimDeduction, // NEW: Include mediclaim deduction
+                mediclaimDeduction,
                 otherDeductions,
                 netPay,
                 paidDays,
@@ -4256,14 +4262,13 @@ app.post('/api/admin/payroll/run', authenticate, authorizeAdmin, async (req, res
                 attendanceSummary: attendanceSummary
             };
 
-            // --- CTC Calculation Components (Assumed/Placeholder Values based on image) ---
+            // --- CTC Calculation Components ---
             const employerPFContributionPercentage = 0.12;
-            const employerESIContributionPercentage = 0.0325;
+            // No need for employerESIContributionPercentage here, as we use the calculated esiEmployer
 
             const employerPFContribution = payslipData.basicSalary * employerPFContributionPercentage;
-            const employerESIContribution = payslipData.grossEarnings * employerESIContributionPercentage;
-
-            const ctc = payslipData.grossEarnings + employerPFContribution + employerESIContribution + payslipData.healthInsuranceFixedForCTC;
+            // Use the already calculated esiEmployer (which is 0 if grossEarnings > ESI_WAGE_LIMIT)
+            const ctc = payslipData.grossEarnings + employerPFContribution + payslipData.esiEmployer + payslipData.healthInsuranceFixedForCTC;
 
 
             let payslipFilePath = null;
@@ -4292,7 +4297,7 @@ app.post('/api/admin/payroll/run', authenticate, authorizeAdmin, async (req, res
                 doc.fontSize(10).font('Helvetica-Bold').text('SALARY BREAKUP - Annexure A', { align: 'center' }).moveDown(1);
 
                 // --- LOGO INTEGRATION ---
-                const logoPath = path.join(__dirname, 'uploads', 'company_logo', 'logo.png');
+                const logoPath = path.join(__dirname, 'uploads', 'company_logo', 'logo.jpeg');
                 if (fs.existsSync(logoPath)) {
                     doc.image(logoPath, doc.page.width - 120, 50, { width: 70, height: 70 });
                     doc.moveDown(2);
@@ -4390,7 +4395,7 @@ app.post('/api/admin/payroll/run', authenticate, authorizeAdmin, async (req, res
                 doc.text((payslipData.loanDeduction * 12).toFixed(2), col4X, currentY);
                 currentY += 20;
 
-                // NEW: Mediclaim Deduction
+                // Mediclaim Deduction
                 doc.fontSize(10).font('Helvetica').text('Mediclaim Deduction', col1X, currentY);
                 doc.text('(Fixed)', col2X, currentY);
                 doc.text(payslipData.mediclaimDeduction.toFixed(2), col3X, currentY);
@@ -4428,8 +4433,8 @@ app.post('/api/admin/payroll/run', authenticate, authorizeAdmin, async (req, res
 
                 doc.fontSize(10).font('Helvetica').text('Employer ESI contribution', col1X, currentY);
                 doc.text('3.25%', col2X, currentY);
-                doc.text(employerESIContribution.toFixed(2), col3X, currentY);
-                doc.text((employerESIContribution * 12).toFixed(2), col4X, currentY);
+                doc.text(payslipData.esiEmployer.toFixed(2), col3X, currentY); // Use the already calculated esiEmployer
+                doc.text((payslipData.esiEmployer * 12).toFixed(2), col4X, currentY); // Use the already calculated esiEmployer
                 currentY += 20;
 
                 doc.moveDown(0.5);
@@ -4477,7 +4482,7 @@ app.post('/api/admin/payroll/run', authenticate, authorizeAdmin, async (req, res
                     professional_tax = EXCLUDED.professional_tax,
                     tds = EXCLUDED.tds,
                     loan_deduction = EXCLUDED.loan_deduction,
-                    mediclaim_deduction = EXCLUDED.mediclaim_deduction, // NEW: Update mediclaim_deduction
+                    mediclaim_deduction = EXCLUDED.mediclaim_deduction,
                     other_deductions = EXCLUDED.other_deductions,
                     net_pay = EXCLUDED.net_pay,
                     paid_days = EXCLUDED.paid_days,
@@ -4489,7 +4494,7 @@ app.post('/api/admin/payroll/run', authenticate, authorizeAdmin, async (req, res
                 [
                     userId, payrollRunId, month, year,
                     grossEarnings, basicSalaryMonthly, hraMonthly, conveyanceAllowanceMonthly, medicalAllowanceMonthly, specialAllowanceMonthly, ltaMonthly, otherEarningsParsed,
-                    totalDeductions, epfEmployee, epfEmployer, esiEmployee, esiEmployer, professionalTax, tds, loanDeduction, mediclaimDeduction, otherDeductions, // NEW: Pass mediclaimDeduction
+                    totalDeductions, epfEmployee, epfEmployer, esiEmployee, esiEmployer, professionalTax, tds, loanDeduction, mediclaimDeduction, otherDeductions,
                     netPay, paidDays, unpaidLeaves, attendanceSummary.presentDays + (attendanceSummary.halfDays * 0.5 || 0),
                     payslipFilePath
                 ]
@@ -4513,7 +4518,6 @@ app.post('/api/admin/payroll/run', authenticate, authorizeAdmin, async (req, res
         client.release();
     }
 });
-
 
 // POST /api/admin/payslips/upload - Upload a payslip file (e.g., PDF) for an employee
 const payslipUpload = multer({
