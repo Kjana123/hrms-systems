@@ -56,7 +56,7 @@ const AdminNotifications = ({
     };
     if (notificationType === 'global') {
       // CORRECTED: Removed '/api' prefix from the global notification endpoint
-      endpoint = `${apiBaseUrl}/admin/notifications/global`;
+      endpoint = `${apiBaseUrl}/api/admin/notifications/global`;
     } else {
       // 'specific'
       if (!selectedEmployeeId) {

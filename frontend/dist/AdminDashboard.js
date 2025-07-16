@@ -452,7 +452,9 @@ const AdminDashboard = ({
     setEditedProfileData({
       ...employee,
       // Ensure date_of_birth is in YYYY-MM-DD format for input type="date"
-      date_of_birth: employee.date_of_birth ? moment(employee.date_of_birth).format('YYYY-MM-DD') : ''
+      date_of_birth: employee.date_of_birth ? moment(employee.date_of_birth).format('YYYY-MM-DD') : '',
+      designation: employee.designation || '',
+      joining_date: employee.joining_date ? moment(employee.joining_date).format('YYYY-MM-DD') : ''
     });
     setIsEditingProfileInModal(false); // Start in view mode
     setProfilePhotoFile(null); // Clear any previously selected file
@@ -1187,6 +1189,28 @@ const AdminDashboard = ({
   }) : /*#__PURE__*/React.createElement("p", {
     className: "mt-1 text-gray-900 dark:text-white"
   }, viewingEmployeeProfile.address || 'N/A')), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "block text-sm font-medium text-gray-700 dark:text-gray-300"
+  }, "Designation:"), isEditingProfileInModal ? /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    name: "designation",
+    value: editedProfileData.designation || '',
+    onChange: handleProfileEditChange,
+    className: "mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500",
+    placeholder: "Enter designation"
+  }) : /*#__PURE__*/React.createElement("p", {
+    className: "mt-1 text-gray-900 dark:text-white"
+  }, viewingEmployeeProfile.designation || 'N/A')), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "block text-sm font-medium text-gray-700 dark:text-gray-300"
+  }, "Joining Date:"), isEditingProfileInModal ? /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    name: "joining_date",
+    value: editedProfileData.joining_date || '' // Should be YYYY-MM-DD
+    ,
+    onChange: handleProfileEditChange,
+    className: "mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+  }) : /*#__PURE__*/React.createElement("p", {
+    className: "mt-1 text-gray-900 dark:text-white"
+  }, viewingEmployeeProfile.joining_date ? moment(viewingEmployeeProfile.joining_date).format('YYYY-MM-DD') : 'N/A')), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     className: "block text-sm font-medium text-gray-700 dark:text-gray-300"
   }, "PAN Card Number:"), isEditingProfileInModal ? /*#__PURE__*/React.createElement("input", {
     type: "text",

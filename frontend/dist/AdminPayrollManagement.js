@@ -446,6 +446,7 @@ function AdminPayrollManagement({
       resetSalaryStructureForm();
     } // Reset form on employee change
     ,
+
     className: "mt-1 block w-full px-3 py-2 border rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white",
     disabled: isEditingSalaryStructure // Disable employee selection when editing
   }, /*#__PURE__*/React.createElement("option", {
@@ -619,27 +620,27 @@ function AdminPayrollManagement({
     className: "grid grid-cols-1 md:grid-cols-2 gap-4"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h6", {
     className: "font-medium text-blue-600 dark:text-blue-400"
-  }, "Earnings"), /*#__PURE__*/React.createElement("p", null, "Basic Salary: \u20B9", previewCalculatedPayslip.basic_salary), /*#__PURE__*/React.createElement("p", null, "HRA: \u20B9", previewCalculatedPayslip.hra), /*#__PURE__*/React.createElement("p", null, "Conveyance Allowance: \u20B9", previewCalculatedPayslip.conveyance_allowance), /*#__PURE__*/React.createElement("p", null, "Medical Allowance: \u20B9", previewCalculatedPayslip.medical_allowance), /*#__PURE__*/React.createElement("p", null, "Special Allowance: \u20B9", previewCalculatedPayslip.special_allowance), /*#__PURE__*/React.createElement("p", null, "LTA: \u20B9", previewCalculatedPayslip.lta), previewCalculatedPayslip.other_earnings && Object.keys(previewCalculatedPayslip.other_earnings).length > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("p", {
+  }, "Earnings"), /*#__PURE__*/React.createElement("p", null, "Basic Salary: \u20B9", previewCalculatedPayslip.earnings?.basicDA?.toFixed(2) || '0.00'), /*#__PURE__*/React.createElement("p", null, "HRA: \u20B9", previewCalculatedPayslip.earnings?.houseRentAllowances?.toFixed(2) || '0.00'), /*#__PURE__*/React.createElement("p", null, "Conveyance Allowance: \u20B9", previewCalculatedPayslip.earnings?.conveyanceAllowances?.toFixed(2) || '0.00'), /*#__PURE__*/React.createElement("p", null, "Medical Allowance: \u20B9", previewCalculatedPayslip.earnings?.medicalAllowances?.toFixed(2) || '0.00'), /*#__PURE__*/React.createElement("p", null, "Special Allowance: \u20B9", previewCalculatedPayslip.earnings?.specialAllowances?.toFixed(2) || '0.00'), /*#__PURE__*/React.createElement("p", null, "LTA: \u20B9", previewCalculatedPayslip.earnings?.lta?.toFixed(2) || '0.00'), previewCalculatedPayslip.earnings?.otherEarnings && Object.keys(previewCalculatedPayslip.earnings.otherEarnings).length > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("p", {
     className: "font-medium mt-2"
-  }, "Other Earnings:"), Object.entries(previewCalculatedPayslip.other_earnings).map(([key, value]) => /*#__PURE__*/React.createElement("p", {
+  }, "Other Earnings:"), Object.entries(previewCalculatedPayslip.earnings.otherEarnings).map(([key, value]) => /*#__PURE__*/React.createElement("p", {
     key: key,
     className: "ml-2 text-sm"
-  }, key, ": \u20B9", value))), /*#__PURE__*/React.createElement("p", {
+  }, key, ": \u20B9", parseFloat(value).toFixed(2)))), /*#__PURE__*/React.createElement("p", {
     className: "mt-2 font-bold"
-  }, "Gross Earnings: \u20B9", previewCalculatedPayslip.gross_earnings)), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h6", {
+  }, "Gross Earnings: \u20B9", previewCalculatedPayslip.earnings?.totalGrossSalary?.toFixed(2) || '0.00')), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h6", {
     className: "font-medium text-red-600 dark:text-red-400"
-  }, "Deductions"), /*#__PURE__*/React.createElement("p", null, "EPF (Employee): \u20B9", previewCalculatedPayslip.epf_employee), /*#__PURE__*/React.createElement("p", null, "ESI (Employee): \u20B9", previewCalculatedPayslip.esi_employee), /*#__PURE__*/React.createElement("p", null, "Professional Tax: \u20B9", previewCalculatedPayslip.professional_tax), /*#__PURE__*/React.createElement("p", null, "TDS: \u20B9", previewCalculatedPayslip.tds), /*#__PURE__*/React.createElement("p", null, "Loan Deduction: \u20B9", previewCalculatedPayslip.loan_deduction), previewCalculatedPayslip.mediclaim_deduction_amount !== undefined && /*#__PURE__*/React.createElement("p", null, "Mediclaim Deduction: \u20B9", previewCalculatedPayslip.mediclaim_deduction_amount), previewCalculatedPayslip.other_deductions && Object.keys(previewCalculatedPayslip.other_deductions).length > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("p", {
+  }, "Deductions"), /*#__PURE__*/React.createElement("p", null, "EPF (Employee): \u20B9", previewCalculatedPayslip.deductions?.providentFund?.toFixed(2) || '0.00'), /*#__PURE__*/React.createElement("p", null, "ESI (Employee): \u20B9", previewCalculatedPayslip.deductions?.esi?.toFixed(2) || '0.00'), /*#__PURE__*/React.createElement("p", null, "Professional Tax: \u20B9", previewCalculatedPayslip.deductions?.professionalTax?.toFixed(2) || '0.00'), /*#__PURE__*/React.createElement("p", null, "TDS: \u20B9", previewCalculatedPayslip.deductions?.tds?.toFixed(2) || '0.00'), /*#__PURE__*/React.createElement("p", null, "Loan Deduction: \u20B9", previewCalculatedPayslip.deductions?.advance?.toFixed(2) || '0.00'), previewCalculatedPayslip.deductions?.mediclaim !== undefined && /*#__PURE__*/React.createElement("p", null, "Mediclaim Deduction: \u20B9", previewCalculatedPayslip.deductions?.mediclaim?.toFixed(2) || '0.00'), previewCalculatedPayslip.deductions?.otherDeductions && Object.keys(previewCalculatedPayslip.deductions.otherDeductions).length > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("p", {
     className: "font-medium mt-2"
-  }, "Other Deductions:"), Object.entries(previewCalculatedPayslip.other_deductions).map(([key, value]) => /*#__PURE__*/React.createElement("p", {
+  }, "Other Deductions:"), Object.entries(previewCalculatedPayslip.deductions.otherDeductions).map(([key, value]) => /*#__PURE__*/React.createElement("p", {
     key: key,
     className: "ml-2 text-sm"
-  }, key, ": \u20B9", value))), /*#__PURE__*/React.createElement("p", {
+  }, key, ": \u20B9", parseFloat(value).toFixed(2)))), /*#__PURE__*/React.createElement("p", {
     className: "mt-2 font-bold"
-  }, "Total Deductions: \u20B9", previewCalculatedPayslip.total_deductions))), /*#__PURE__*/React.createElement("div", {
+  }, "Total Deductions: \u20B9", previewCalculatedPayslip.deductions?.totalDeductions?.toFixed(2) || '0.00'))), /*#__PURE__*/React.createElement("div", {
     className: "mt-4 pt-4 border-t border-gray-300 dark:border-gray-600"
   }, /*#__PURE__*/React.createElement("p", {
     className: "text-2xl font-bold text-green-700 dark:text-green-300"
-  }, "Net Pay: \u20B9", previewCalculatedPayslip.net_pay))), /*#__PURE__*/React.createElement("h4", {
+  }, "Net Pay: \u20B9", previewCalculatedPayslip.summary?.netSalary?.toFixed(2) || '0.00'))), /*#__PURE__*/React.createElement("h4", {
     className: "text-lg font-semibold mt-8 mb-4"
   }, "Employee's Salary History"), selectedEmployeeForSalary && employeeSalaryStructures.length > 0 ? /*#__PURE__*/React.createElement("div", {
     className: "overflow-x-auto"
