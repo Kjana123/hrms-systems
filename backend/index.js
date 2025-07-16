@@ -2511,7 +2511,7 @@ app.delete('/api/admin/leave-balances', authenticate, authorizeAdmin, async (req
     }
 });
 
-app.post('/admin/notifications/global', authenticate, authorizeAdmin, async (req, res) => {
+app.post('/api/admin/notifications/global', authenticate, authorizeAdmin, async (req, res) => {
     const { message, type } = req.body; // 'type' is optional, e.g., 'info', 'warning', 'success', 'error'
 
     if (!message || message.trim() === '') {
