@@ -78,7 +78,7 @@ app.use(cookieParser());
 app.use(useragent.express());
 
 app.use(cors({
-  origin: ['https://attendance.unitedsolutionsplus.in', 'http://127.0.0.1:5000'],
+  origin: ['https://attendance.unitedsolutionsplus.in', 'http://127.0.0.1:5000', 'http://localhost:3001', 'http://localhost:3000'],
   credentials: true,
   
 }));
@@ -1587,191 +1587,219 @@ app.post('/api/admin/profile-update-requests/:id/approve', authenticate, authori
 });
 
 // NEW ENDPOINT: Admin rejects a profile update request
+// Assuming 'pool', 'authenticate', 'authorizeAdmin', 'upload', 'bcrypt', and 'moment' are already defined and imported.
+
+// Admin: Reject a profile update request
 app.post('/api/admin/profile-update-requests/:id/reject', authenticate, authorizeAdmin, async (req, res) => {
-  const { id } = req.params; // Using 'id' for consistency with common REST patterns
-  const { admin_comment } = req.body;
-  const adminId = req.user.id;
-  const adminName = req.user.name;
+    const { id } = req.params; // Using 'id' for consistency with common REST patterns
+    const { admin_comment } = req.body;
+    const adminId = req.user.id;
+    const adminName = req.user.name;
 
-  let client;
-  try {
-    client = await pool.connect();
-    await client.query('BEGIN');
+    let client;
+    try {
+        client = await pool.connect();
+        await client.query('BEGIN');
 
-    const { rows } = await client.query(
-      'SELECT user_id, status FROM profile_update_requests WHERE id = $1 FOR UPDATE',
-      [id]
-    );
+        const { rows } = await client.query(
+            'SELECT user_id, status FROM profile_update_requests WHERE id = $1 FOR UPDATE',
+            [id]
+        );
 
-    if (rows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ message: 'Profile update request not found.' });
+        if (rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ message: 'Profile update request not found.' });
+        }
+
+        const request = rows[0];
+        if (request.status !== 'pending') {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ message: `Request already ${request.status}. Cannot reject.` });
+        }
+
+        // Update the request status
+        await client.query(
+            'UPDATE profile_update_requests SET status = $1, admin_comment = $2, reviewed_at = CURRENT_TIMESTAMP, reviewed_by = $3 WHERE id = $4',
+            ['rejected', admin_comment || null, adminId, id] // Use reviewed_by and reviewed_at
+        );
+
+        // Notify the employee that their request has been rejected
+        await client.query(
+            'INSERT INTO notifications (user_id, message) VALUES ($1, $2)',
+            [request.user_id, `Your profile update request (ID: ${id}) has been REJECTED by ${adminName}. Reason: ${admin_comment || 'No reason provided.'}`]
+        );
+
+        await client.query('COMMIT');
+        res.json({ message: 'Profile update request rejected.' });
+
+    } catch (error) {
+        if (client) await client.query('ROLLBACK');
+        console.error('Error rejecting profile update request:', error.message, error.stack);
+        res.status(500).json({ message: 'Server error rejecting profile update request.' });
+    } finally {
+        if (client) client.release();
     }
-
-    const request = rows[0];
-    if (request.status !== 'pending') {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ message: `Request already ${request.status}. Cannot reject.` });
-    }
-
-    // Update the request status
-    await client.query(
-      'UPDATE profile_update_requests SET status = $1, admin_comment = $2, reviewed_at = CURRENT_TIMESTAMP, reviewed_by = $3 WHERE id = $4',
-      ['rejected', admin_comment || null, adminId, id] // Use reviewed_by and reviewed_at
-    );
-
-    // Notify the employee that their request has been rejected
-    await client.query(
-      'INSERT INTO notifications (user_id, message) VALUES ($1, $2)',
-      [request.user_id, `Your profile update request (ID: ${id}) has been REJECTED by ${adminName}. Reason: ${admin_comment || 'No reason provided.'}`]
-    );
-
-    await client.query('COMMIT');
-    res.json({ message: 'Profile update request rejected.' });
-
-  } catch (error) {
-    if (client) await client.query('ROLLBACK');
-    console.error('Error rejecting profile update request:', error.message, error.stack);
-    res.status(500).json({ message: 'Server error rejecting profile update request.' });
-  } finally {
-    if (client) client.release();
-  }
 });
 
 
-// Admin: Get all users with their full profile details
-// MODIFIED: app.get('/api/admin/users') to fetch all employee data including new profile fields
+// app.get('/api/admin/users' - Fetches all users for admin dashboard
 app.get('/api/admin/users', authenticate, authorizeAdmin, async (req, res) => {
-  let client; // Declare client outside try to ensure it's accessible in finally
-  try {
-    client = await pool.connect(); // Get a client from the pool for transaction
+    let client; // Declare client outside try to ensure it's accessible in finally
+    try {
+        client = await pool.connect(); // Get a client from the pool for transaction
 
-    // Removed the tableCheck as it's generally not needed in production
-    // and adds unnecessary overhead. If the table is missing, the query below
-    // will throw an appropriate error.
+        const { rows } = await client.query(
+            `SELECT
+                id,
+                name,
+                email,
+                employee_id,
+                role,
+                shift_type,
+                address,
+                mobile_number,
+                kyc_details,
+                personal_details,
+                family_history,
+                profile_photo,
+                pan_card_number,
+                bank_account_number,
+                ifsc_code,
+                bank_name,
+                date_of_birth,
+                designation,    -- ADDED: designation field
+                joining_date,   -- ADDED: joining_date field
+                created_at,
+                updated_at
+            FROM users
+            ORDER BY name ASC`
+        );
 
-    const { rows } = await client.query(
-      `SELECT
-        id,
-        name,
-        email,
-        employee_id,
-        role,
-        shift_type,
-        address,
-        mobile_number,
-        kyc_details,
-        personal_details,
-        family_history,
-        profile_photo,
-        pan_card_number,        -- NEW FIELD
-        bank_account_number,    -- NEW FIELD
-        ifsc_code,              -- NEW FIELD
-        bank_name,              -- NEW FIELD
-        date_of_birth,          -- NEW FIELD
-        created_at,
-        updated_at
-      FROM users
-      ORDER BY name ASC`
-    );
-
-    res.json(rows.map(user => ({
-      ...user,
-      // Construct full URL for profile photo if it exists
-      profile_photo: user.profile_photo ? `/uploads/profile_photos/${user.profile_photo}` : null,
-      // Ensure date_of_birth is formatted as YYYY-MM-DD for consistency
-      date_of_birth: user.date_of_birth ? moment(user.date_of_birth).format('YYYY-MM-DD') : null,
-    })));
-  } catch (error) {
-    console.error('Error in /api/admin/users:', error.message, error.stack);
-    res.status(500).json({ message: `Server error fetching users: ${error.message}` });
-  } finally {
-    if (client) { // Ensure client exists before releasing
-      client.release(); // Release the client back to the pool
+        res.json(rows.map(user => ({
+            ...user,
+            // Construct full URL for profile photo if it exists
+            profile_photo: user.profile_photo ? `/uploads/profile_photos/${user.profile_photo}` : null,
+            // Ensure date_of_birth is formatted as YYYY-MM-DD for consistency
+            date_of_birth: user.date_of_birth ? moment(user.date_of_birth).format('YYYY-MM-DD') : null,
+            designation: user.designation || null, // Ensure designation is included
+            joining_date: user.joining_date ? moment(user.joining_date).format('YYYY-MM-DD') : null, // Ensure joining_date is formatted
+        })));
+    } catch (error) {
+        console.error('Error in /api/admin/users:', error.message, error.stack);
+        res.status(500).json({ message: `Server error fetching users: ${error.message}` });
+    } finally {
+        if (client) { // Ensure client exists before releasing
+            client.release(); // Release the client back to the pool
+        }
     }
-  }
 });
 
-// MODIFIED: app.put('/api/admin/users/:id') to allow admin to edit new employee details
+// app.post('/admin/register-employee' - Registers a new employee (Admin only)
+app.post('/admin/register-employee', authenticate, authorizeAdmin, async (req, res) => {
+    const { name, email, password, employee_id, role, shift_type, designation, joining_date } = req.body; // ADDED: designation, joining_date
+    try {
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const result = await pool.query(
+            `INSERT INTO users (name, email, password_hash, employee_id, role, shift_type, designation, joining_date)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, name, email, employee_id, role, shift_type, designation, joining_date`, // ADDED: designation, joining_date in RETURNING
+            [name, email, hashedPassword, employee_id, role, shift_type, designation, joining_date] // ADDED: designation, joining_date
+        );
+        res.status(201).json({ message: 'Employee registered successfully', user: result.rows[0] });
+    } catch (error) {
+        console.error('Error registering employee:', error.message, error.stack);
+        if (error.code === '23505') { // Unique violation code for PostgreSQL
+            return res.status(409).json({ message: 'Employee ID or Email already exists.' });
+        }
+        res.status(500).json({ message: 'Server error during registration.' });
+    }
+});
+
+// app.put('/api/admin/users/:id' - Allows admin to edit employee details including new fields
 app.put('/api/admin/users/:id', authenticate, authorizeAdmin, upload.single('photo'), async (req, res) => {
-  try {
-    const { id } = req.params;
-    const {
-      name, email, employee_id, role, shift_type, address, mobile_number,
-      kyc_details, personal_details, family_history, password, // Existing + recently added by you
-      pan_card_number, bank_account_number, ifsc_code, bank_name, date_of_birth // NEW FIELDS from our plan
-    } = req.body;
+    try {
+        const { id } = req.params;
+        const {
+            name, email, employee_id, role, shift_type, address, mobile_number,
+            kyc_details, personal_details, family_history, password,
+            pan_card_number, bank_account_number, ifsc_code, bank_name, date_of_birth,
+            designation, joining_date // ADDED: designation and joining_date
+        } = req.body;
 
-    const photoFilename = req.file ? req.file.filename : null;
+        const photoFilename = req.file ? req.file.filename : null;
 
-    // Start building the query dynamically to include only provided fields
-    const updateFields = [];
-    const queryParams = [];
-    let paramIndex = 1;
+        // Start building the query dynamically to include only provided fields
+        const updateFields = [];
+        const queryParams = [];
+        let paramIndex = 1;
 
-    // Conditionally add fields to updateFields and queryParams
-    if (name !== undefined) { updateFields.push(`name = $${paramIndex++}`); queryParams.push(name); }
-    if (email !== undefined) { updateFields.push(`email = $${paramIndex++}`); queryParams.push(email); }
-    if (employee_id !== undefined) { updateFields.push(`employee_id = $${paramIndex++}`); queryParams.push(employee_id); }
-    if (role !== undefined) { updateFields.push(`role = $${paramIndex++}`); queryParams.push(role); }
-    if (shift_type !== undefined) { updateFields.push(`shift_type = $${paramIndex++}`); queryParams.push(shift_type); }
-    if (address !== undefined) { updateFields.push(`address = $${paramIndex++}`); queryParams.push(address); }
-    if (mobile_number !== undefined) { updateFields.push(`mobile_number = $${paramIndex++}`); queryParams.push(mobile_number); }
-    if (kyc_details !== undefined) { updateFields.push(`kyc_details = $${paramIndex++}`); queryParams.push(kyc_details); }
-    if (personal_details !== undefined) { updateFields.push(`personal_details = $${paramIndex++}`); queryParams.push(personal_details); }
-    if (family_history !== undefined) { updateFields.push(`family_history = $${paramIndex++}`); queryParams.push(family_history); }
-    
-    // NEW FIELDS from our plan
-    if (pan_card_number !== undefined) { updateFields.push(`pan_card_number = $${paramIndex++}`); queryParams.push(pan_card_number); }
-    if (bank_account_number !== undefined) { updateFields.push(`bank_account_number = $${paramIndex++}`); queryParams.push(bank_account_number); }
-    if (ifsc_code !== undefined) { updateFields.push(`ifsc_code = $${paramIndex++}`); queryParams.push(ifsc_code); }
-    if (bank_name !== undefined) { updateFields.push(`bank_name = $${paramIndex++}`); queryParams.push(bank_name); }
-    if (date_of_birth !== undefined) { updateFields.push(`date_of_birth = $${paramIndex++}`); queryParams.push(date_of_birth); }
+        // Conditionally add fields to updateFields and queryParams
+        if (name !== undefined) { updateFields.push(`name = $${paramIndex++}`); queryParams.push(name); }
+        if (email !== undefined) { updateFields.push(`email = $${paramIndex++}`); queryParams.push(email); }
+        if (employee_id !== undefined) { updateFields.push(`employee_id = $${paramIndex++}`); queryParams.push(employee_id); }
+        if (role !== undefined) { updateFields.push(`role = $${paramIndex++}`); queryParams.push(role); }
+        if (shift_type !== undefined) { updateFields.push(`shift_type = $${paramIndex++}`); queryParams.push(shift_type); }
+        if (address !== undefined) { updateFields.push(`address = $${paramIndex++}`); queryParams.push(address); }
+        if (mobile_number !== undefined) { updateFields.push(`mobile_number = $${paramIndex++}`); queryParams.push(mobile_number); }
+        if (kyc_details !== undefined) { updateFields.push(`kyc_details = $${paramIndex++}`); queryParams.push(kyc_details); }
+        if (personal_details !== undefined) { updateFields.push(`personal_details = $${paramIndex++}`); queryParams.push(personal_details); }
+        if (family_history !== undefined) { updateFields.push(`family_history = $${paramIndex++}`); queryParams.push(family_history); }
 
-    // Password and photo are handled separately as they are optional and require specific logic
-    if (password) {
-      const hashedPassword = await bcrypt.hash(password, 10);
-      updateFields.push(`password_hash = $${paramIndex++}`);
-      queryParams.push(hashedPassword);
+        // NEW FIELDS
+        if (pan_card_number !== undefined) { updateFields.push(`pan_card_number = $${paramIndex++}`); queryParams.push(pan_card_number); }
+        if (bank_account_number !== undefined) { updateFields.push(`bank_account_number = $${paramIndex++}`); queryParams.push(bank_account_number); }
+        if (ifsc_code !== undefined) { updateFields.push(`ifsc_code = $${paramIndex++}`); queryParams.push(ifsc_code); }
+        if (bank_name !== undefined) { updateFields.push(`bank_name = $${paramIndex++}`); queryParams.push(bank_name); }
+        if (date_of_birth !== undefined) { updateFields.push(`date_of_birth = $${paramIndex++}`); queryParams.push(date_of_birth); }
+
+        // ADDED: designation and joining_date update conditions
+        if (designation !== undefined) { updateFields.push(`designation = $${paramIndex++}`); queryParams.push(designation); }
+        if (joining_date !== undefined) { updateFields.push(`joining_date = $${paramIndex++}`); queryParams.push(joining_date); } // Assuming joining_date comes as 'YYYY-MM-DD' string
+
+        // Password and photo are handled separately as they are optional and require specific logic
+        if (password) {
+            const hashedPassword = await bcrypt.hash(password, 10);
+            updateFields.push(`password_hash = $${paramIndex++}`);
+            queryParams.push(hashedPassword);
+        }
+        if (photoFilename) {
+            updateFields.push(`profile_photo = $${paramIndex++}`);
+            queryParams.push(photoFilename);
+        }
+
+        if (updateFields.length === 0) {
+            return res.status(400).json({ message: 'No fields provided for update.' });
+        }
+
+        // Add updated_at timestamp
+        updateFields.push(`updated_at = CURRENT_TIMESTAMP`);
+
+        // Add the user ID to the query parameters
+        queryParams.push(id);
+
+        const query = `UPDATE users SET ${updateFields.join(', ')} WHERE id = $${paramIndex} RETURNING *`;
+        const { rows } = await pool.query(query, queryParams);
+
+        if (rows.length === 0) {
+            return res.status(404).json({ message: 'User not found.' });
+        }
+
+        const updatedUser = rows[0];
+        res.json({
+            message: 'User profile updated successfully.',
+            user: {
+                ...updatedUser,
+                profile_photo: updatedUser.profile_photo ? `/uploads/profile_photos/${updatedUser.profile_photo}` : null,
+                date_of_birth: updatedUser.date_of_birth ? moment(updatedUser.date_of_birth).format('YYYY-MM-DD') : null,
+                joining_date: updatedUser.joining_date ? moment(updatedUser.joining_date).format('YYYY-MM-DD') : null, // Ensure joining_date is formatted for response
+            }
+        });
+    } catch (error) {
+        console.error('Error updating user:', error.message, error.stack);
+        if (error.code === '23505') { // Unique violation code for PostgreSQL
+            return res.status(409).json({ message: 'Email or Employee ID already exists.' });
+        }
+        res.status(500).json({ message: 'Server error updating user.' });
     }
-    if (photoFilename) {
-      updateFields.push(`profile_photo = $${paramIndex++}`);
-      queryParams.push(photoFilename);
-    }
-
-    if (updateFields.length === 0) {
-      return res.status(400).json({ message: 'No fields provided for update.' });
-    }
-
-    // Add updated_at timestamp
-    updateFields.push(`updated_at = CURRENT_TIMESTAMP`);
-
-    // Add the user ID to the query parameters
-    queryParams.push(id);
-
-    const query = `UPDATE users SET ${updateFields.join(', ')} WHERE id = $${paramIndex} RETURNING *`;
-    const { rows } = await pool.query(query, queryParams);
-
-    if (rows.length === 0) {
-      return res.status(404).json({ message: 'User not found.' });
-    }
-
-    const updatedUser = rows[0];
-    res.json({
-      message: 'User profile updated successfully.',
-      user: {
-        ...updatedUser,
-        profile_photo: updatedUser.profile_photo ? `/uploads/profile_photos/${updatedUser.profile_photo}` : null,
-        date_of_birth: updatedUser.date_of_birth ? moment(updatedUser.date_of_birth).format('YYYY-MM-DD') : null,
-      }
-    });
-  } catch (error) {
-    console.error('Error updating user:', error.message, error.stack);
-    if (error.code === '23505') { // Unique violation code for PostgreSQL
-      return res.status(409).json({ message: 'Email or Employee ID already exists.' });
-    }
-    res.status(500).json({ message: 'Server error updating user.' });
-  }
 });
 
 app.delete('/api/admin/users/:id', authenticate, authorizeAdmin, async (req, res) => {
@@ -3576,7 +3604,7 @@ const dayNameToMomentDay = {
 
 // Helper function to calculate attendance summary (used by both summary and payroll calculation)
 async function calculateAttendanceSummary(userId, year, month, client, leaveApplications, rejectedLeaves) {
-    console.log(`[CODE_VERSION_CHECK] Running calculateAttendanceSummary v8.17 (July 12, 2025 - Holiday/WO Always Paid Fix)`);
+    console.log(`[CODE_VERSION_CHECK] Running calculateAttendanceSummary v8.21 (July 17, 2025 - Attendance Layout & Typo Fix)`);
     // Ensure month is always two digits for consistent parsing
     const formattedMonth = String(month).padStart(2, '0');
     const startDateOfMonth = moment.utc(`${year}-${formattedMonth}-01`);
@@ -3607,7 +3635,6 @@ async function calculateAttendanceSummary(userId, year, month, client, leaveAppl
 
     // Fetch attendance records for the month
     const attendanceRecords = (await client.query(
-        // MODIFIED: Select daily_leave_duration
         `SELECT date, status, check_in, check_out, working_hours, late_time, extra_hours, daily_leave_duration FROM attendance
          WHERE user_id = $1 AND EXTRACT(MONTH FROM date) = $2 AND EXTRACT(YEAR FROM date) = $3`,
         [userId, month, year]
@@ -3676,8 +3703,8 @@ async function calculateAttendanceSummary(userId, year, month, client, leaveAppl
             const woEndDate = relevantWeeklyOffConfig.end_date ? moment.utc(relevantWeeklyOffConfig.end_date) : null;
 
             isWeeklyOffForThisDay = relevantWeeklyOffConfig.weekly_off_days.includes(currentMomentDayOfWeek) &&
-                                    currentDate.isSameOrAfter(woEffectiveDate, 'day') &&
-                                    (!woEndDate || currentDate.isSameOrBefore(woEndDate, 'day'));
+                                     currentDate.isSameOrAfter(woEffectiveDate, 'day') &&
+                                     (!woEndDate || currentDate.isSameOrBefore(woEndDate, 'day'));
         }
 
         const isPublicHoliday = publicHolidayDates.has(formattedDate);
@@ -3777,12 +3804,14 @@ async function calculateAttendanceSummary(userId, year, month, client, leaveAppl
     }
 
     // Final calculation adjustments
-    // MODIFIED: totalUnpaidLeaves now uses summed lopDays
-    const totalUnpaidLeaves = lopDays + absentWorkingDays; // LOP days (summed duration) + general absent days
+    // totalUnpaidLeaves now correctly sums LOP days (from attendance records) and general absent days
+    const totalUnpaidLeaves = lopDays + absentWorkingDays;
 
-    // paidDays for payroll are typically Present + Late + On_Leave
-    // MODIFIED: paidDaysForPayroll now uses summed onLeaveDays
-    const paidDaysForPayroll = presentDays + onLeaveDays;
+    // This is the total number of days the employee is paid for, consistent with the main payroll calculation
+    const totalPayableDaysForPayroll = totalCalendarDays - totalUnpaidLeaves;
+
+    // This is a specific metric: days physically present or on approved paid leave
+    const actualPresentAndPaidLeaveDays = presentDays + onLeaveDays;
 
     // CORRECTED: averageDailyHours should only consider days with actual recorded working hours
     const totalDaysWithRecordedHours = presentDays; // Only days where actual hours were logged (PRESENT or LATE)
@@ -3796,7 +3825,8 @@ async function calculateAttendanceSummary(userId, year, month, client, leaveAppl
     console.log(`[ATTENDANCE_SUMMARY_DEBUG]   LOP Days (Unpaid Leaves from Attendance): ${lopDays}`);
     console.log(`[ATTENDANCE_SUMMARY_DEBUG]   Absent Working Days (from Attendance): ${absentWorkingDays}`);
     console.log(`[ATTENDANCE_SUMMARY_DEBUG]   Total Unpaid Leaves (LOP + Absent): ${totalUnpaidLeaves}`);
-    console.log(`[ATTENDANCE_SUMMARY_DEBUG]   Paid Days (for Payroll): ${paidDaysForPayroll}`);
+    console.log(`[ATTENDANCE_SUMMARY_DEBUG]   Total Payable Days for Payroll: ${totalPayableDaysForPayroll}`); // New metric
+    console.log(`[ATTENDANCE_SUMMARY_DEBUG]   Actual Present & Paid Leave Days: ${actualPresentAndPaidLeaveDays}`); // Renamed metric
     console.log(`[ATTENDANCE_SUMMARY_DEBUG]   Total Actual Working Hours: ${totalActualWorkingHours.toFixed(2)}`);
     console.log(`[ATTENDANCE_SUMMARY_DEBUG]   Average Daily Hours: ${averageDailyHours}`);
     console.log(`[ATTENDANCE_SUMMARY_DEBUG]   Holidays Count: ${holidaysCount}`);
@@ -3811,11 +3841,14 @@ async function calculateAttendanceSummary(userId, year, month, client, leaveAppl
         holidaysCount,
         presentDays: parseFloat(presentDays.toFixed(2)),
         lateDays: parseFloat(lateDays.toFixed(2)),
-        // MODIFIED: leaveDays and lopDays now return summed durations
         leaveDays: parseFloat(onLeaveDays.toFixed(2)), // This is the sum of 'on_leave' durations
         lopDays: parseFloat(lopDays.toFixed(2)),      // This is the sum of 'lop' durations
         absentDays: parseFloat(absentWorkingDays.toFixed(2)), // Unaccounted absences
-        paidDays: parseFloat(paidDaysForPayroll.toFixed(2)), // Total paid days for salary calculation
+        
+        // Renamed for clarity and added the new total payable days
+        actualPresentAndPaidLeaveDays: parseFloat(actualPresentAndPaidLeaveDays.toFixed(2)),
+        totalPayableDaysForPayroll: parseFloat(totalPayableDaysForPayroll.toFixed(2)), // This will be 29 in your example
+
         unpaidLeaves: parseFloat(totalUnpaidLeaves.toFixed(2)), // Total unpaid for salary calculation
         totalWorkingHours: parseFloat(totalActualWorkingHours.toFixed(2)),
         averageDailyHours: averageDailyHours,
@@ -3823,6 +3856,326 @@ async function calculateAttendanceSummary(userId, year, month, client, leaveAppl
     };
 }
 
+// Helper function to convert numbers to words (Indian Rupees specific)
+// Helper function to convert numbers to words (Indian Rupees specific)
+function convertNumberToWords(num) {
+    if (typeof num !== 'number') {
+        num = parseFloat(num);
+    }
+    if (isNaN(num) || num < 0) {
+        return 'Invalid Number';
+    }
+    if (num === 0) {
+        return 'Zero';
+    }
+
+    // Round to the nearest whole number before converting to words
+    let num_int = Math.round(num);
+
+    const a = ['', 'one ', 'two ', 'three ', 'four ', 'five ', 'six ', 'seven ', 'eight ', 'nine ', 'ten ', 'eleven ', 'twelve ', 'thirteen ', 'fourteen ', 'fifteen ', 'sixteen ', 'seventeen ', 'eighteen ', 'nineteen '];
+    const b = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+    const g = ['', 'thousand', 'million', 'billion', 'trillion', 'quadrillion', 'quintillion', 'sextillion', 'septillion', 'octillion', 'nonillion', 'decillion'];
+
+    let str = '';
+    let i = 0;
+
+    while (num_int > 0) {
+        let p = num_int % 1000;
+        if (p > 0) {
+            let h = Math.floor(p / 100);
+            let t = p % 100;
+            let s = '';
+
+            if (h > 0) {
+                s += a[h] + 'hundred ';
+            }
+
+            if (t < 20) {
+                s += a[t];
+            } else {
+                s += b[Math.floor(t / 10)] + ' ' + a[t % 10];
+            }
+            str = s.trim() + ' ' + g[i] + ' ' + str;
+        }
+        num_int = Math.floor(num_int / 1000);
+        i++;
+    }
+
+    let result = str.trim();
+    // Capitalize the first letter of each word
+    result = result.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+    return result.replace(/\s+/g, ' ').trim() + ' Only';
+}
+
+// Function to generate PDF payslip using PDFKit
+// Function to generate PDF payslip using PDFKit
+// Placeholder for convertNumberToWords function if it's not defined elsewhere
+// You should replace this with your actual implementation if you have one.
+function convertNumberToWords(num) {
+    const a = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+    const b = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+
+    const numToWordsFull = (n) => {
+        if ((n = n.toString()).length > 9) return 'overflow';
+        const n_string = ('000000000' + n).substr(-9).match(/^(\d{2})(\d{2})(\d{2})(\d{1})(\d{2})$/);
+        if (!n_string) return '';
+
+        let str = '';
+        str += (Number(n_string[1]) != 0) ? (a[Number(n_string[1])] || b[n_string[1][0]] + ' ' + a[n_string[1][1]]) + ' crore ' : '';
+        str += (Number(n_string[2]) != 0) ? (a[Number(n_string[2])] || b[n_string[2][0]] + ' ' + a[n_string[2][1]]) + ' lakh ' : '';
+        str += (Number(n_string[3]) != 0) ? (a[Number(n_string[3])] || b[n_string[3][0]] + ' ' + a[n_string[3][1]]) + ' thousand ' : '';
+        str += (Number(n_string[4]) != 0) ? (a[Number(n_string[4])] || b[n_string[4][0]] + ' ' + a[n_string[4][1]]) + ' hundred ' : '';
+        str += (Number(n_string[5]) != 0) ? ((str != '') ? 'and ' : '') + (a[Number(n_string[5])] || b[n_string[5][0]] + ' ' + a[n_string[5][1]]) + '' : '';
+        return str.trim();
+    };
+
+    // Handle decimal part
+    const [integerPart, decimalPart] = num.toFixed(2).split('.');
+    let wordsFullInteger = numToWordsFull(integerPart);
+    let finalWords = '';
+
+    // Capitalize the first letter of each word in the integer part
+    if (wordsFullInteger) {
+        finalWords = wordsFullInteger.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ');
+    }
+
+    if (decimalPart && parseFloat(decimalPart) > 0) {
+        let paiseWordsFull = numToWordsFull(decimalPart);
+        let paiseCapitalized = '';
+        if (paiseWordsFull) {
+            paiseCapitalized = paiseWordsFull.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ');
+        }
+        finalWords += ` And ${paiseCapitalized} Paise`; // Full words for paise
+    }
+    
+    finalWords += ' Only'; // Add "Only" as a separate word, capitalized
+
+    return finalWords.trim();
+}
+
+
+// Function to generate PDF payslip using PDFKit
+async function generatePayslipPDF(data, outputPath) {
+    return new Promise((resolve, reject) => {
+        const doc = new PDFDocument({ margin: 50 });
+        const stream = fs.createWriteStream(outputPath);
+        doc.pipe(stream);
+
+        // Define the path to the logo image
+        const logoPath = path.join(__dirname, 'uploads', 'company_logo', 'logo.jpeg');
+
+        // --- Company Info and Logo Section ---
+        const companyNameX = doc.page.margins.left;
+        const companyNameY = doc.page.margins.top;
+        const companyAddressY = companyNameY + doc.fontSize(16).heightOfString(data.companyInfo.name) + 2;
+
+        const logoWidth = 120; // Increased width for bigger logo
+        const logoHeight = 60; // Increased height
+        const logoX = doc.page.width - doc.page.margins.right - logoWidth;
+        const logoY = companyNameY;
+
+        // Draw company name and address (left-aligned)
+        doc.fontSize(16).font('Helvetica-Bold').text(data.companyInfo.name, companyNameX, companyNameY, { align: 'left' });
+        doc.fontSize(10).font('Helvetica').text(data.companyInfo.address, companyNameX, companyAddressY, { align: 'left' });
+        
+        // Add logo if the file exists
+        if (fs.existsSync(logoPath)) {
+            try {
+                // Use fit to ensure aspect ratio is maintained within the given bounds
+                doc.image(logoPath, logoX, logoY, { fit: [logoWidth, logoHeight], align: 'right', valign: 'top' });
+            } catch (imgError) {
+                console.error(`Error embedding logo: ${imgError.message}`);
+            }
+        } else {
+            console.warn(`Logo file not found at: ${logoPath}. Skipping logo embedding.`);
+        }
+
+        // Calculate the highest point reached by the header elements to start new content below it
+        let currentY = Math.max(companyAddressY + doc.fontSize(10).heightOfString(data.companyInfo.address), logoY + logoHeight) + 20;
+        doc.y = currentY;
+
+        // --- Salary Slip Title ---
+        doc.fontSize(18).text('SALARY SLIP', { align: 'center', underline: true });
+        doc.moveDown();
+        currentY = doc.y;
+
+        // --- Employee Header Details (Two-column layout) ---
+        doc.fontSize(10);
+        const headerLeftColX = doc.page.margins.left;
+        const headerRightColX = doc.page.width / 2 + 30;
+        const headerColWidth = (doc.page.width / 2) - doc.page.margins.left - 30;
+        const headerRowHeight = 18;
+
+        // Row 1
+        doc.text(`Employee ID:`, headerLeftColX, currentY, { continued: true, width: headerColWidth });
+        doc.font('Helvetica-Bold').text(`${data.headerDetails.employeeId}`, headerLeftColX + 70, currentY, { width: headerColWidth });
+        doc.font('Helvetica').text(`Employee Name:`, headerRightColX, currentY, { continued: true, width: headerColWidth });
+        doc.font('Helvetica-Bold').text(`${data.headerDetails.employeeName}`, headerRightColX + 85, currentY, { width: headerColWidth });
+        currentY += headerRowHeight;
+        doc.y = currentY;
+
+        // Row 2
+        doc.font('Helvetica').text(`Designation:`, headerLeftColX, currentY, { continued: true, width: headerColWidth });
+        doc.font('Helvetica-Bold').text(`${data.headerDetails.designation}`, headerLeftColX + 70, currentY, { width: headerColWidth });
+        doc.font('Helvetica').text(`Month/Year:`, headerRightColX, currentY, { continued: true, width: headerColWidth });
+        doc.font('Helvetica-Bold').text(`${data.headerDetails.monthYear}`, headerRightColX + 85, currentY, { width: headerColWidth });
+        currentY += headerRowHeight;
+        doc.y = currentY;
+
+        // Row 3
+        doc.font('Helvetica').text(`Joining Date:`, headerLeftColX, currentY, { continued: true, width: headerColWidth });
+        doc.font('Helvetica-Bold').text(`${data.headerDetails.joiningDate}`, headerLeftColX + 70, currentY, { width: headerColWidth });
+        doc.font('Helvetica').text(`Payable Days:`, headerRightColX, currentY, { continued: true, width: headerColWidth });
+        doc.font('Helvetica-Bold').text(`${data.headerDetails.payableDays}`, headerRightColX + 85, currentY, { width: headerColWidth });
+        currentY += headerRowHeight;
+        doc.y = currentY + 25;
+
+        // --- Earnings and Deductions Tables (Side-by-Side) ---
+        const tableStartY = doc.y;
+        const tableColumnPadding = 20; // Padding between the two main table columns
+        const singleTableWidth = (doc.page.width - doc.page.margins.left - doc.page.margins.right - tableColumnPadding) / 2;
+        const tableLeftX = doc.page.margins.left;
+        const tableRightX = tableLeftX + singleTableWidth + tableColumnPadding;
+        const tableRowHeight = 18;
+        const amountColWidth = 70; // Fixed width for amount columns
+        const descriptionColWidth = singleTableWidth - amountColWidth; // Width for description columns
+
+        // Earnings Title
+        doc.fontSize(12).text('Earnings', tableLeftX, tableStartY, { underline: true });
+        // Deductions Title
+        doc.text('Deductions', tableRightX, tableStartY, { underline: true });
+        let currentTableY = tableStartY + doc.fontSize(12).heightOfString('Earnings') + 5;
+
+        // Table Headers (Earnings)
+        doc.fontSize(10).font('Helvetica-Bold').text('Description', tableLeftX, currentTableY, { width: descriptionColWidth });
+        doc.text('Amount (₹)', tableLeftX + descriptionColWidth, currentTableY, { align: 'right', width: amountColWidth });
+
+        // Table Headers (Deductions)
+        doc.text('Description', tableRightX, currentTableY, { width: descriptionColWidth });
+        doc.text('Amount (₹)', tableRightX + descriptionColWidth, currentTableY, { align: 'right', width: amountColWidth });
+        currentTableY += tableRowHeight;
+
+        // Draw line below headers for both tables
+        doc.lineWidth(0.5);
+        doc.lineCap('butt').moveTo(tableLeftX, currentTableY - 2).lineTo(tableLeftX + singleTableWidth, currentTableY - 2).stroke();
+        doc.lineCap('butt').moveTo(tableRightX, currentTableY - 2).lineTo(tableRightX + singleTableWidth, currentTableY - 2).stroke();
+
+        doc.font('Helvetica'); // Reset font for table content
+
+        // Prepare data for iteration
+        const earningsRows = [
+            { desc: 'Basic + DA', val: (data.earnings.basicDA || 0).toFixed(2) },
+            { desc: 'House Rent Allowances', val: (data.earnings.houseRentAllowances || 0).toFixed(2) },
+            { desc: 'Conveyance Allowances', val: (data.earnings.conveyanceAllowances || 0).toFixed(2) },
+            { desc: 'Special Allowances', val: (data.earnings.specialAllowances || 0).toFixed(2) },
+            { desc: 'LTA', val: (data.earnings.lta || 0).toFixed(2) },
+            { desc: 'Medical Allowances', val: (data.earnings.medicalAllowances || 0).toFixed(2) }
+        ];
+        if (data.earnings.otherEarnings) {
+            for (const key in data.earnings.otherEarnings) {
+                earningsRows.push({ desc: key, val: parseFloat(data.earnings.otherEarnings[key] || 0).toFixed(2) });
+            }
+        }
+
+        const deductionsRows = [
+            { desc: 'Provident Fund', val: (data.deductions.providentFund || 0).toFixed(2) },
+            { desc: 'ESI', val: (data.deductions.esi || 0).toFixed(2) },
+            { desc: 'Professional Tax', val: (data.deductions.professionalTax || 0).toFixed(2) },
+            { desc: 'Advance', val: (data.deductions.advance || 0).toFixed(2) },
+            { desc: 'GHI', val: (data.deductions.mediclaim || 0).toFixed(2) },
+            { desc: 'TDS', val: (data.deductions.tds || 0).toFixed(2) }
+        ];
+        if (data.deductions.otherDeductions) {
+            for (const key in data.deductions.otherDeductions) {
+                if (key !== 'grill') {
+                    deductionsRows.push({ desc: key, val: parseFloat(data.deductions.otherDeductions[key] || 0).toFixed(2) });
+                }
+            }
+        }
+        
+        const totalTableRows = Math.max(earningsRows.length, deductionsRows.length);
+
+        for (let i = 0; i < totalTableRows; i++) {
+            // Ensure both columns start at the same Y position for each row
+            const startRowY = currentTableY;
+
+            // Earnings Column
+            if (earningsRows[i]) {
+                doc.fontSize(10).text(earningsRows[i].desc, tableLeftX, startRowY, { width: descriptionColWidth });
+                doc.text(earningsRows[i].val, tableLeftX + descriptionColWidth, startRowY, { align: 'right', width: amountColWidth });
+            }
+
+            // Deductions Column
+            if (deductionsRows[i]) {
+                doc.fontSize(10).text(deductionsRows[i].desc, tableRightX, startRowY, { width: descriptionColWidth });
+                doc.text(deductionsRows[i].val, tableRightX + descriptionColWidth, startRowY, { align: 'right', width: amountColWidth });
+            }
+            currentTableY += tableRowHeight; // Increment Y for the next row
+        }
+
+        // --- Total Gross Salary and Total Deductions ---
+        // Get the current Y position after drawing the lines
+        const totalAmountsY = currentTableY + 5; // Add some space before totals
+        doc.lineWidth(0.5);
+        doc.lineCap('butt').moveTo(tableLeftX, totalAmountsY - 2).lineTo(tableLeftX + singleTableWidth, totalAmountsY - 2).stroke(); // Line above total gross
+        doc.lineCap('butt').moveTo(tableRightX, totalAmountsY - 2).lineTo(tableRightX + singleTableWidth, totalAmountsY - 2).stroke(); // Line above total deductions
+
+        doc.font('Helvetica-Bold').fontSize(10).text('Total Gross Salary', tableLeftX, totalAmountsY, { width: descriptionColWidth });
+        doc.text((data.earnings.totalGrossSalary || 0).toFixed(2), tableLeftX + descriptionColWidth, totalAmountsY, { align: 'right', width: amountColWidth });
+
+        // Position Total Deductions label and value on the same line
+        doc.text('Total Deductions', tableRightX, totalAmountsY, { width: descriptionColWidth });
+        doc.text((data.deductions.totalDeductions || 0).toFixed(2), tableRightX + descriptionColWidth, totalAmountsY, { align: 'right', width: amountColWidth });
+        doc.moveDown(1); // Space after totals
+
+
+        // --- Net Pay Summary and Salary Paid By ---
+        const netPayLabelX = doc.page.margins.left;
+        const netPayValueX = netPayLabelX + 120; // X position for the values
+
+        doc.y = doc.y + 10; // Add some vertical spacing
+        doc.fontSize(12).font('Helvetica-Bold').text(`Net Pay:`, netPayLabelX, doc.y, { continued: true });
+        doc.text(`₹${(data.summary.netSalary || 0).toFixed(2)}`, netPayLabelX + 100, doc.y, { align: 'left', width: 150 });
+        doc.moveDown(0.5);
+
+        doc.fontSize(10).font('Helvetica').text(`Salary In Words:`, netPayLabelX, doc.y, { continued: true });
+        // Adjust the width for Salary In Words to prevent cutting off
+        // Use a larger width for the text to allow it to wrap naturally
+        doc.text(`${data.summary.netSalaryInWords}`, netPayLabelX + 100, doc.y, { align: 'left', width: doc.page.width - (netPayLabelX + 100) - doc.page.margins.right, lineBreak: true });
+        doc.moveDown();
+
+        doc.fontSize(10).text(`Salary Paid By:`, netPayLabelX, doc.y, { continued: true });
+        doc.text(`${data.paymentDetails.salaryPaidBy}`, netPayLabelX + 100, doc.y, { align: 'left', width: doc.page.width - netPayValueX - doc.page.margins.right });
+        doc.moveDown(2);
+
+
+        // --- Signatures and System Generated Text (Footer) ---
+        const signatureLeftX = doc.page.margins.left;
+        const signatureRightX = doc.page.width / 2 + 30;
+        const signatureColWidth = (doc.page.width / 2) - doc.page.margins.left - 30;
+        
+        doc.fontSize(10).text('Employee Signature', signatureLeftX, doc.y, { width: signatureColWidth });
+        
+        // Director name and system generated text on the right
+        const directorNameY = doc.y; // Capture current Y for director name
+        doc.text(`Director - ${data.signatures.directorName}`, signatureRightX, directorNameY, { align: 'right', width: signatureColWidth });
+        doc.moveDown(0.5); // Move down for the system generated text
+
+        // System generated text (as per image_46cbdd.png)
+        doc.fontSize(8).font('Helvetica-Oblique').text('This is a system generated payslip, hence the signature is not required.', signatureRightX, doc.y, { align: 'right', width: signatureColWidth });
+
+        doc.end();
+
+        stream.on('finish', () => {
+            console.log(`PDF generated at: ${outputPath}`);
+            resolve();
+        });
+        stream.on('error', (err) => {
+            console.error(`Error writing PDF to file: ${err}`);
+            reject(err);
+        });
+    });
+}
 
 // GET /api/admin/attendance/summary/:userId/:year/:month - Get attendance summary for a specific employee and month
 app.get('/api/admin/attendance/summary/:userId/:year/:month', authenticate, authorizeAdmin, async (req, res) => {
@@ -3854,10 +4207,10 @@ app.get('/api/admin/attendance/summary/:userId/:year/:month', authenticate, auth
 
 app.get('/api/admin/payroll/preview/:userId/:year/:month', authenticate, authorizeAdmin, async (req, res) => {
     const { userId, year, month } = req.params;
-    const client = await pool.connect();
+    const client = await pool.connect(); // Assuming 'pool' is your PostgreSQL connection pool
 
     try {
-        // Fetch necessary payroll settings (excluding fixed PT rate)
+        // Fetch necessary payroll settings
         const payrollSettings = (await client.query('SELECT setting_name, setting_value FROM payroll_settings')).rows.reduce((acc, s) => {
             acc[s.setting_name] = s.setting_value;
             return acc;
@@ -3869,7 +4222,7 @@ app.get('/api/admin/payroll/preview/:userId/:year/:month', authenticate, authori
         const ESI_EMPLOYEE_RATE = parseFloat(payrollSettings.ESI_EMPLOYEE_RATE || '0.0075');
         const ESI_EMPLOYER_RATE = parseFloat(payrollSettings.ESI_EMPLOYER_RATE || '0.0325');
         const ESI_WAGE_LIMIT = parseFloat(payrollSettings.ESI_WAGE_LIMIT || '21000');
-        // PROFESSIONAL_TAX_WEST_BENGAL_RATE is now fetched from professional_tax_slabs, removed from payroll_settings
+        const HEALTH_INSURANCE_FIXED_FOR_CTC = parseFloat(payrollSettings.HEALTH_INSURANCE_FIXED_FOR_CTC || '0');
 
         // Fetch Employee's Latest Salary Structure
         let salaryStructure = null;
@@ -3883,19 +4236,26 @@ app.get('/api/admin/payroll/preview/:userId/:year/:month', authenticate, authori
             return res.status(404).json({ message: 'No salary structure found for this employee.' });
         }
 
-        // Fetch employee's state for professional tax calculation
-        const userDetailsResult = await client.query('SELECT state FROM users WHERE id = $1', [userId]);
-        const employeeState = userDetailsResult.rows[0]?.state || 'West Bengal'; // Default to West Bengal
+        // Fetch employee's details (name, state, designation, joining_date) from users table
+        const userDetailsResult = await client.query('SELECT name, state, designation, joining_date, employee_id FROM users WHERE id = $1', [userId]);
+        const employeeName = userDetailsResult.rows[0]?.name || 'N/A';
+        const employeeId = userDetailsResult.rows[0]?.employee_id || 'N/A';
+        const employeeDesignation = userDetailsResult.rows[0]?.designation || 'N/A';
+        const employeeJoiningDate = userDetailsResult.rows[0]?.joining_date ? moment(userDetailsResult.rows[0].joining_date).format('YYYY-MM-DD') : null;
+
 
         // Get detailed attendance summary using the helper function
         const attendanceSummary = await calculateAttendanceSummary(userId, parseInt(year), parseInt(month), client);
 
-        const totalDaysInMonth = attendanceSummary.totalCalendarDays; // Calendar days, for pro-rata denominator
-        const paidDays = attendanceSummary.paidDays; // Actual paid days for salary calculation
-        const totalUnpaidDays = attendanceSummary.unpaidLeaves;
+        // Corrected Payable Days Calculation:
+        // totalUnpaidLeaves already includes lopDays and other absent working days.
+        const payableDays = attendanceSummary.totalCalendarDays - (attendanceSummary.unpaidLeaves || 0);
 
-        // Earnings Calculation (Pro-rata based on paidDays)
-        const proRataFactor = (attendanceSummary.totalWorkingDaysInMonth > 0) ? (paidDays / attendanceSummary.totalWorkingDaysInMonth) : 0;
+
+        // Earnings Calculation (Pro-rata based on payableDays)
+        // If totalCalendarDays is 0, set factor to 0 to avoid division by zero.
+        const proRataFactor = (attendanceSummary.totalCalendarDays > 0) ? (payableDays / attendanceSummary.totalCalendarDays) : 0;
+
 
         let basicSalaryMonthly = parseFloat(salaryStructure.basic_salary || 0) * proRataFactor;
         let hraMonthly = parseFloat(salaryStructure.hra || 0) * proRataFactor;
@@ -3909,6 +4269,7 @@ app.get('/api/admin/payroll/preview/:userId/:year/:month', authenticate, authori
         let otherEarningsParsed = {};
         if (salaryStructure.other_earnings) {
             try {
+                // Assuming other_earnings from DB is already a parsed JSON object or can be directly used
                 otherEarningsParsed = salaryStructure.other_earnings;
                 for (const key in otherEarningsParsed) {
                     grossEarnings += (parseFloat(otherEarningsParsed[key]) || 0) * proRataFactor;
@@ -3927,8 +4288,8 @@ app.get('/api/admin/payroll/preview/:userId/:year/:month', authenticate, authori
         let professionalTax = 0;
         let tds = 0;
         let loanDeduction = 0;
-        let mediclaimDeduction = parseFloat(salaryStructure.mediclaim_deduction_amount || 0); // NEW: Mediclaim Deduction
-        let otherDeductions = {};
+        let mediclaimDeduction = 0;
+        let otherDeductionsParsed = {};
 
         // EPF Calculation
         const epfApplicableSalary = Math.min(basicSalaryMonthly, EPF_MAX_SALARY_LIMIT);
@@ -3941,70 +4302,125 @@ app.get('/api/admin/payroll/preview/:userId/:year/:month', authenticate, authori
             esiEmployee = grossEarnings * ESI_EMPLOYEE_RATE;
             esiEmployer = grossEarnings * ESI_EMPLOYER_RATE;
             totalDeductions += esiEmployee;
+        } else {
+            esiEmployee = 0;
+            esiEmployer = 0;
         }
 
-        // Professional Tax Calculation (from professional_tax_slabs table)
-        if (grossEarnings > 0) {
-            try {
-                const ptSlabResult = await client.query(
-                    `SELECT tax_amount FROM professional_tax_slabs
-                     WHERE state = $1
-                     AND $2 >= min_gross_salary
-                     AND ($2 <= max_gross_salary OR max_gross_salary IS NULL)
-                     ORDER BY effective_date DESC, id DESC
-                     LIMIT 1`,
-                    [employeeState, grossEarnings]
-                );
 
-                if (ptSlabResult.rows.length > 0) {
-                    professionalTax = parseFloat(ptSlabResult.rows[0].tax_amount);
-                    console.log(`[PAYROLL_DEBUG] Professional Tax for gross ${grossEarnings} in ${employeeState}: ${professionalTax}`);
-                } else {
-                    console.warn(`[PAYROLL_WARN] No professional tax slab found for gross earnings ${grossEarnings} in ${employeeState}. Setting PT to 0.`);
-                }
-            } catch (ptError) {
-                console.error(`[PAYROLL_ERROR] Error fetching professional tax slab for user ${userId}:`, ptError.message);
+        // Professional Tax Calculation (Updated with new slabs)
+        if (grossEarnings > 0) {
+            if (grossEarnings >= 8501 && grossEarnings <= 10000) {
+                professionalTax = 0.00;
+            } else if (grossEarnings >= 10001 && grossEarnings <= 15000) {
+                professionalTax = 110.00;
+            } else if (grossEarnings >= 15001 && grossEarnings <= 25000) {
+                professionalTax = 130.00;
+            } else if (grossEarnings >= 25001 && grossEarnings <= 40000) {
+                professionalTax = 150.00;
+            } else if (grossEarnings > 40001) {
+                professionalTax = 200.00;
             }
+            console.log(`[PAYROLL_DEBUG] Professional Tax calculated for gross ${grossEarnings}: ${professionalTax}`);
         }
         totalDeductions += professionalTax;
 
         tds = 0; // Placeholder
-        totalDeductions += tds;
+        totalDeductions += tds; // Corrected typo
 
-        loanDeduction = 0; // Placeholder
-        totalDeductions += loanDeduction;
+        loanDeduction = 0; // Placeholder for Advance
+        totalDeductions += loanDeduction; // Corrected typo
 
-        totalDeductions += mediclaimDeduction; // NEW: Add mediclaim deduction to total deductions
+        // Mediclaim Deduction (Conditional logic added)
+        if (grossEarnings > 21000) {
+            mediclaimDeduction = 410.00;
+        } else {
+            mediclaimDeduction = 0.00;
+        }
+        totalDeductions += mediclaimDeduction; // Corrected typo
+
+        if (salaryStructure.other_deductions) {
+            try {
+                // Assuming other_deductions from DB is already a parsed JSON object or can be directly used
+                otherDeductionsParsed = salaryStructure.other_deductions;
+                for (const key in otherDeductionsParsed) {
+                    totalDeductions += (parseFloat(otherDeductionsParsed[key]) || 0);
+                }
+            } catch (e) {
+                console.error(`Error parsing other_deductions for user ${userId} during preview:`, e);
+            }
+        }
+
 
         // Net Pay Calculation
         let netPay = grossEarnings - totalDeductions;
 
-        // Round all numeric values to 2 decimal places
-        const previewResult = {
-            payslip_month: parseInt(month),
-            payslip_year: parseInt(year),
-            gross_earnings: parseFloat(grossEarnings.toFixed(2)),
-            basic_salary: parseFloat(basicSalaryMonthly.toFixed(2)),
-            hra: parseFloat(hraMonthly.toFixed(2)),
-            conveyance_allowance: parseFloat(conveyanceAllowanceMonthly.toFixed(2)),
-            medical_allowance: parseFloat(medicalAllowanceMonthly.toFixed(2)),
-            special_allowance: parseFloat(specialAllowanceMonthly.toFixed(2)),
-            lta: parseFloat(ltaMonthly.toFixed(2)),
-            other_earnings: otherEarningsParsed,
-            total_deductions: parseFloat(totalDeductions.toFixed(2)),
-            epf_employee: parseFloat(epfEmployee.toFixed(2)),
-            epf_employer: parseFloat(epfEmployer.toFixed(2)),
-            esi_employee: parseFloat(esiEmployee.toFixed(2)),
-            esi_employer: parseFloat(esiEmployer.toFixed(2)),
-            professional_tax: parseFloat(professionalTax.toFixed(2)),
-            tds: parseFloat(tds.toFixed(2)),
-            loan_deduction: parseFloat(loanDeduction.toFixed(2)),
-            mediclaim_deduction: parseFloat(mediclaimDeduction.toFixed(2)), // NEW: Include in preview
-            other_deductions: otherDeductions,
-            net_pay: parseFloat(netPay.toFixed(2)),
-            paid_days: parseFloat(paidDays.toFixed(2)),
-            total_unpaid_leaves: parseFloat(totalUnpaidDays.toFixed(2)),
-            attendance_summary: {
+        // Round all numeric values to 2 decimal places for storage and PDF display
+        grossEarnings = parseFloat(grossEarnings.toFixed(2));
+        basicSalaryMonthly = parseFloat(basicSalaryMonthly.toFixed(2));
+        hraMonthly = parseFloat(hraMonthly.toFixed(2));
+        conveyanceAllowanceMonthly = parseFloat(conveyanceAllowanceMonthly.toFixed(2));
+        medicalAllowanceMonthly = parseFloat(medicalAllowanceMonthly.toFixed(2));
+        specialAllowanceMonthly = parseFloat(specialAllowanceMonthly.toFixed(2));
+        ltaMonthly = parseFloat(ltaMonthly.toFixed(2));
+        totalDeductions = parseFloat(totalDeductions.toFixed(2));
+        epfEmployee = parseFloat(epfEmployee.toFixed(2));
+        epfEmployer = parseFloat(epfEmployer.toFixed(2));
+        esiEmployee = parseFloat(esiEmployee.toFixed(2));
+        esiEmployer = parseFloat(esiEmployer.toFixed(2));
+        professionalTax = parseFloat(professionalTax.toFixed(2));
+        tds = parseFloat(tds.toFixed(2));
+        loanDeduction = parseFloat(loanDeduction.toFixed(2));
+        mediclaimDeduction = parseFloat(mediclaimDeduction.toFixed(2));
+        netPay = parseFloat(netPay.toFixed(2));
+
+        // Construct payslip data object for PDF generation
+        const payrollSlipData = {
+            companyInfo: {
+                name: "BEYOND BIM TECHNOLOGIES PRIVATE LIMITED",
+                address: "WEBEL IT PARK, GANDHI MORE, DURGAPUR-713213, WEST BENGAL, INDIA"
+            },
+            headerDetails: {
+                employeeId: employeeId, // Use fetched employee_id
+                designation: employeeDesignation,
+                joiningDate: employeeJoiningDate,
+                employeeName: employeeName,
+                monthYear: `${new Date(year, month - 1).toLocaleString('en-US', { month: 'long' })} ${year}`,
+                payableDays: parseFloat(payableDays.toFixed(2)), // Use the newly calculated payableDays (this will be 29)
+                planDsn: "Jun-25" // Placeholder from image, adjust if dynamic
+            },
+            earnings: {
+                basicDA: parseFloat(basicSalaryMonthly.toFixed(2)),
+                houseRentAllowances: parseFloat(hraMonthly.toFixed(2)),
+                conveyanceAllowances: parseFloat(conveyanceAllowanceMonthly.toFixed(2)),
+                specialAllowances: parseFloat(specialAllowanceMonthly.toFixed(2)),
+                lta: parseFloat(ltaMonthly.toFixed(2)),
+                medicalAllowances: parseFloat(medicalAllowanceMonthly.toFixed(2)),
+                otherEarnings: otherEarningsParsed,
+                totalGrossSalary: parseFloat(grossEarnings.toFixed(2))
+            },
+            deductions: {
+                providentFund: parseFloat(epfEmployee.toFixed(2)),
+                esi: parseFloat(esiEmployee.toFixed(2)),
+                professionalTax: parseFloat(professionalTax.toFixed(2)),
+                advance: parseFloat(loanDeduction.toFixed(2)),
+                grill: parseFloat((otherDeductionsParsed.grill || 0).toFixed(2)), // Ensure grill is handled if it exists
+                mediclaim: parseFloat(mediclaimDeduction.toFixed(2)),
+                otherDeductions: otherDeductionsParsed,
+                totalDeductions: parseFloat(totalDeductions.toFixed(2))
+            },
+            summary: {
+                netSalary: parseFloat(netPay.toFixed(2)),
+                netSalaryInWords: convertNumberToWords(netPay), // Dynamically convert netPay to words
+            },
+            paymentDetails: {
+                salaryPaidBy: "Bank Account" // Placeholder, adjust if dynamic
+            },
+            signatures: {
+                employeeSignature: "", // Placeholder
+                directorName: "Ajay Kantha" // Placeholder, adjust if dynamic
+            },
+            attendance_summary_details: {
                 totalCalendarDays: attendanceSummary.totalCalendarDays,
                 totalWorkingDaysInMonth: attendanceSummary.totalWorkingDaysInMonth,
                 actualWeeklyOffDays: attendanceSummary.actualWeeklyOffDays,
@@ -4014,12 +4430,16 @@ app.get('/api/admin/payroll/preview/:userId/:year/:month', authenticate, authori
                 leaveDays: attendanceSummary.leaveDays,
                 lopDays: attendanceSummary.lopDays,
                 absentDays: attendanceSummary.absentDays,
+                totalUnpaidLeaves: attendanceSummary.unpaidLeaves, // Ensure this is available
+                totalPayableDaysForPayroll: attendanceSummary.totalPayableDaysForPayroll, // New field for clarity
+                actualPresentAndPaidLeaveDays: attendanceSummary.actualPresentAndPaidLeaveDays, // Renamed field
                 totalWorkingHours: attendanceSummary.totalWorkingHours,
                 averageDailyHours: attendanceSummary.averageDailyHours
-            }
+            },
+            healthInsuranceFixedForCTC: HEALTH_INSURANCE_FIXED_FOR_CTC
         };
 
-        res.json(previewResult);
+        res.json(payrollSlipData);
 
     } catch (error) {
         console.error('Error previewing payroll:', error.message, error.stack);
@@ -4029,9 +4449,7 @@ app.get('/api/admin/payroll/preview/:userId/:year/:month', authenticate, authori
     }
 });
 
-
-// POST /api/admin/payroll/run - Initiate a payroll calculation for a month/year
-// This endpoint will now also generate PDF payslips and store their paths, with the new styling.
+// POST /api/admin/payroll/run' - Triggers a payroll calculation and payslip generation for all active employees
 app.post('/api/admin/payroll/run', authenticate, authorizeAdmin, async (req, res) => {
     const { month, year } = req.body;
     const adminId = req.user.id; // Admin performing the run
@@ -4080,10 +4498,11 @@ app.post('/api/admin/payroll/run', authenticate, authorizeAdmin, async (req, res
         const ESI_EMPLOYEE_RATE = parseFloat(payrollSettings.ESI_EMPLOYEE_RATE || '0.0075');
         const ESI_EMPLOYER_RATE = parseFloat(payrollSettings.ESI_EMPLOYER_RATE || '0.0325');
         const ESI_WAGE_LIMIT = parseFloat(payrollSettings.ESI_WAGE_LIMIT || '21000');
+        const HEALTH_INSURANCE_FIXED_FOR_CTC = parseFloat(payrollSettings.HEALTH_INSURANCE_FIXED_FOR_CTC || '0');
 
 
         // --- FETCH ALL ACTIVE EMPLOYEES ---
-        const employees = (await client.query('SELECT id, name, employee_id, email, pan_card_number, bank_account_number, ifsc_code, bank_name, date_of_birth, address, mobile_number, state FROM users WHERE role IN ($1, $2)', ['employee', 'admin'])).rows;
+        const employees = (await client.query('SELECT id, name, employee_id, email, pan_card_number, bank_account_number, ifsc_code, bank_name, date_of_birth, address, mobile_number, state, designation, joining_date FROM users WHERE role IN ($1, $2)', ['employee', 'admin'])).rows;
 
         for (const employee of employees) {
             const userId = employee.id;
@@ -4100,19 +4519,20 @@ app.post('/api/admin/payroll/run', authenticate, authorizeAdmin, async (req, res
                 continue;
             }
 
-            // Determine employee's state for professional tax calculation
-            const employeeState = employee.state || 'West Bengal';
+            const employeeDesignation = employee.designation || 'N/A';
+            const employeeJoiningDate = employee.joining_date ? moment(employee.joining_date).format('YYYY-MM-DD') : null;
+
 
             // 2. Get detailed attendance summary using the helper function
             const attendanceSummary = await calculateAttendanceSummary(userId, parseInt(year), parseInt(month), client);
 
-            const totalDaysInMonth = attendanceSummary.totalCalendarDays;
-            const paidDays = attendanceSummary.paidDays;
-            const unpaidLeaves = attendanceSummary.unpaidLeaves;
+            // Corrected Payable Days Calculation:
+            // totalUnpaidLeaves already includes lopDays and other absent working days.
+            const payableDays = attendanceSummary.totalCalendarDays - (attendanceSummary.unpaidLeaves || 0);
 
 
-            // 3. Earnings Calculation (Pro-rata based on paidDays)
-            const proRataFactor = (attendanceSummary.totalWorkingDaysInMonth > 0) ? (paidDays / attendanceSummary.totalWorkingDaysInMonth) : 0;
+            // 3. Earnings Calculation (Pro-rata based on payableDays)
+            const proRataFactor = (attendanceSummary.totalCalendarDays > 0) ? (payableDays / attendanceSummary.totalCalendarDays) : 0;
 
             let basicSalaryMonthly = parseFloat(salaryStructure.basic_salary || 0) * proRataFactor;
             let hraMonthly = parseFloat(salaryStructure.hra || 0) * proRataFactor;
@@ -4126,7 +4546,6 @@ app.post('/api/admin/payroll/run', authenticate, authorizeAdmin, async (req, res
             let otherEarningsParsed = {};
             if (salaryStructure.other_earnings) {
                 try {
-                    // Assuming other_earnings is already a parsed JSON object or similar
                     otherEarningsParsed = salaryStructure.other_earnings;
                     for (const key in otherEarningsParsed) {
                         grossEarnings += (parseFloat(otherEarningsParsed[key]) || 0) * proRataFactor;
@@ -4142,11 +4561,11 @@ app.post('/api/admin/payroll/run', authenticate, authorizeAdmin, async (req, res
             let epfEmployee = 0;
             let epfEmployer = 0;
             let esiEmployee = 0;
-            let esiEmployer = 0; // Initialize esiEmployer here
+            let esiEmployer = 0;
             let professionalTax = 0;
             let tds = 0;
             let loanDeduction = 0;
-            let mediclaimDeduction = parseFloat(salaryStructure.mediclaim_deduction_amount || 0); // Get mediclaim deduction
+            let mediclaimDeduction = 0;
             let otherDeductions = {};
 
             // EPF Calculation (Employee & Employer Share)
@@ -4158,52 +4577,61 @@ app.post('/api/admin/payroll/run', authenticate, authorizeAdmin, async (req, res
             // ESI Calculation
             if (grossEarnings <= ESI_WAGE_LIMIT) {
                 esiEmployee = grossEarnings * ESI_EMPLOYEE_RATE;
-                esiEmployer = grossEarnings * ESI_EMPLOYER_RATE; // This is the correct esiEmployer
+                esiEmployer = grossEarnings * ESI_EMPLOYER_RATE;
                 totalDeductions += esiEmployee;
             } else {
-                // If grossEarnings exceeds limit, ESI contributions are 0
                 esiEmployee = 0;
                 esiEmployer = 0;
             }
 
 
-            // Professional Tax Calculation (from professional_tax_slabs table)
+            // Professional Tax Calculation (Updated with new slabs)
             if (grossEarnings > 0) {
-                try {
-                    const ptSlabResult = await client.query(
-                        `SELECT tax_amount FROM professional_tax_slabs
-                         WHERE state = $1
-                         AND $2 >= min_gross_salary
-                         AND ($2 <= max_gross_salary OR max_gross_salary IS NULL)
-                         ORDER BY effective_date DESC, id DESC
-                         LIMIT 1`,
-                        [employeeState, grossEarnings]
-                    );
-
-                    if (ptSlabResult.rows.length > 0) {
-                        professionalTax = parseFloat(ptSlabResult.rows[0].tax_amount);
-                        console.log(`[PAYROLL_DEBUG] Professional Tax for gross ${grossEarnings} in ${employeeState}: ${professionalTax}`);
-                    } else {
-                        console.warn(`[PAYROLL_WARN] No professional tax slab found for gross earnings ${grossEarnings} in ${employeeState}. Setting PT to 0.`);
-                    }
-                } catch (ptError) {
-                    console.error(`[PAYROLL_ERROR] Error fetching professional tax slab for user ${userId}:`, ptError.message);
+                if (grossEarnings >= 8501 && grossEarnings <= 10000) {
+                    professionalTax = 0.00;
+                } else if (grossEarnings >= 10001 && grossEarnings <= 15000) {
+                    professionalTax = 110.00;
+                } else if (grossEarnings >= 15001 && grossEarnings <= 25000) {
+                    professionalTax = 130.00;
+                } else if (grossEarnings >= 25001 && grossEarnings <= 40000) {
+                    professionalTax = 150.00;
+                } else if (grossEarnings > 40001) {
+                    professionalTax = 200.00;
                 }
+                console.log(`[PAYROLL_DEBUG] Professional Tax calculated for gross ${grossEarnings}: ${professionalTax}`);
             }
             totalDeductions += professionalTax;
 
-            tds = 0; // **IMPORTANT: Implement actual TDS calculation here based on full Indian IT rules**
-            totalDeductions += tds;
+            tds = 0; // Placeholder
+            totalDeductions += tds; // Corrected typo
 
             loanDeduction = 0; // Example: fetch from a 'employee_loans' table
-            totalDeductions += loanDeduction;
+            totalDeductions += loanDeduction; // Corrected typo
 
-            totalDeductions += mediclaimDeduction; // Add mediclaim deduction to total deductions
+            // Mediclaim Deduction (Conditional logic added)
+            if (grossEarnings > 21000) {
+                mediclaimDeduction = 410.00;
+            } else {
+                mediclaimDeduction = 0.00;
+            }
+            totalDeductions += mediclaimDeduction; // Corrected typo
+
+            if (salaryStructure.other_deductions) {
+                try {
+                    otherDeductions = salaryStructure.other_deductions;
+                    for (const key in otherDeductions) {
+                        totalDeductions += (parseFloat(otherDeductions[key]) || 0);
+                    }
+                } catch (e) {
+                    console.error(`Error parsing other_deductions for user ${userId}:`, e);
+                }
+            }
+
 
             // 5. Net Pay Calculation
             let netPay = grossEarnings - totalDeductions;
 
-            // Round all numeric values to 2 decimal places for storage
+            // Round all numeric values to 2 decimal places for storage and PDF display
             grossEarnings = parseFloat(grossEarnings.toFixed(2));
             basicSalaryMonthly = parseFloat(basicSalaryMonthly.toFixed(2));
             hraMonthly = parseFloat(hraMonthly.toFixed(2));
@@ -4215,7 +4643,7 @@ app.post('/api/admin/payroll/run', authenticate, authorizeAdmin, async (req, res
             epfEmployee = parseFloat(epfEmployee.toFixed(2));
             epfEmployer = parseFloat(epfEmployer.toFixed(2));
             esiEmployee = parseFloat(esiEmployee.toFixed(2));
-            esiEmployer = parseFloat(esiEmployer.toFixed(2)); // Ensure esiEmployer is rounded here
+            esiEmployer = parseFloat(esiEmployer.toFixed(2));
             professionalTax = parseFloat(professionalTax.toFixed(2));
             tds = parseFloat(tds.toFixed(2));
             loanDeduction = parseFloat(loanDeduction.toFixed(2));
@@ -4224,247 +4652,101 @@ app.post('/api/admin/payroll/run', authenticate, authorizeAdmin, async (req, res
 
             // Construct payslip data object for PDF generation
             const payslipData = {
-                employeeName: employee.name,
-                employeeId: employee.employee_id,
-                panCardNumber: employee.pan_card_number,
-                bankAccountNumber: employee.bank_account_number,
-                ifscCode: employee.ifsc_code,
-                bankName: employee.bank_name,
-                dateOfBirth: employee.date_of_birth,
-                address: employee.address,
-                mobileNumber: employee.mobile_number,
-                payslipMonth: month,
-                payslipYear: year,
-                grossEarnings,
-                basicSalary: basicSalaryMonthly,
-                hra: hraMonthly,
-                conveyanceAllowance: conveyanceAllowanceMonthly,
-                medicalAllowance: medicalAllowanceMonthly,
-                specialAllowance: specialAllowanceMonthly,
-                lta: ltaMonthly,
-                otherEarnings: otherEarningsParsed,
-                totalDeductions,
-                epfEmployee,
-                epfEmployer,
-                esiEmployee,
-                esiEmployer, // Use the calculated esiEmployer here
-                professionalTax,
-                tds,
-                loanDeduction,
-                mediclaimDeduction,
-                otherDeductions,
-                netPay,
-                paidDays,
-                unpaidLeaves,
-                professionalTaxFixedForCTC: 150.00, // Fixed as per image
-                healthInsuranceFixedForCTC: 410.00, // Fixed as per image
-                daysPresent: attendanceSummary.presentDays + (attendanceSummary.halfDays * 0.5 || 0),
-                attendanceSummary: attendanceSummary
+                companyInfo: {
+                    name: "BEYOND BIM TECHNOLOGIES PRIVATE LIMITED",
+                    address: "WEBEL IT PARK, GANDHI MORE, DURGAPUR-713213, WEST BENGAL, INDIA"
+                },
+                headerDetails: {
+                    employeeId: employee.employee_id,
+                    designation: employeeDesignation,
+                    joiningDate: employeeJoiningDate,
+                    employeeName: employee.name,
+                    monthYear: `${new Date(year, month - 1).toLocaleString('en-US', { month: 'long' })} ${year}`,
+                    payableDays: parseFloat(payableDays.toFixed(2)), // This will be 29
+                    planDsn: "Jun-25" // Placeholder from image, adjust if dynamic
+                },
+                earnings: {
+                    basicDA: basicSalaryMonthly,
+                    houseRentAllowances: hraMonthly,
+                    conveyanceAllowances: conveyanceAllowanceMonthly,
+                    specialAllowances: specialAllowanceMonthly,
+                    lta: ltaMonthly,
+                    medicalAllowances: medicalAllowanceMonthly,
+                    otherEarnings: otherEarningsParsed,
+                    totalGrossSalary: grossEarnings
+                },
+                deductions: {
+                    providentFund: epfEmployee,
+                    esi: esiEmployee,
+                    professionalTax: professionalTax,
+                    advance: loanDeduction,
+                    mediclaim: mediclaimDeduction,
+                    otherDeductions: otherDeductions, // Pass the parsed other deductions
+                    totalDeductions: totalDeductions
+                },
+                summary: {
+                    netSalary: netPay,
+                    netSalaryInWords: convertNumberToWords(netPay),
+                },
+                paymentDetails: {
+                    salaryPaidBy: "Bank Account"
+                },
+                signatures: {
+                    employeeSignature: "",
+                    directorName: "Ajay Kantha"
+                },
+                attendance_summary_details: {
+                    totalCalendarDays: attendanceSummary.totalCalendarDays,
+                    totalWorkingDaysInMonth: attendanceSummary.totalWorkingDaysInMonth,
+                    actualWeeklyOffDays: attendanceSummary.actualWeeklyOffDays,
+                    holidaysCount: attendanceSummary.holidaysCount,
+                    presentDays: attendanceSummary.presentDays,
+                    lateDays: attendanceSummary.lateDays,
+                    leaveDays: attendanceSummary.leaveDays,
+                    lopDays: attendanceSummary.lopDays,
+                    absentDays: attendanceSummary.absentDays,
+                    totalUnpaidLeaves: attendanceSummary.unpaidLeaves, // Ensure this is available
+                    totalPayableDaysForPayroll: attendanceSummary.totalPayableDaysForPayroll, // New field for clarity
+                    actualPresentAndPaidLeaveDays: attendanceSummary.actualPresentAndPaidLeaveDays, // Renamed field
+                    totalWorkingHours: attendanceSummary.totalWorkingHours,
+                    averageDailyHours: attendanceSummary.averageDailyHours
+                },
+                healthInsuranceFixedForCTC: HEALTH_INSURANCE_FIXED_FOR_CTC
             };
 
-            // --- CTC Calculation Components ---
-            const employerPFContributionPercentage = 0.12;
-            // No need for employerESIContributionPercentage here, as we use the calculated esiEmployer
-
-            const employerPFContribution = payslipData.basicSalary * employerPFContributionPercentage;
-            // Use the already calculated esiEmployer (which is 0 if grossEarnings > ESI_WAGE_LIMIT)
-            const ctc = payslipData.grossEarnings + employerPFContribution + payslipData.esiEmployer + payslipData.healthInsuranceFixedForCTC;
-
-
             let payslipFilePath = null;
+            const UPLOADS_DIR = path.join(__dirname, 'uploads'); // Define UPLOADS_DIR here if not defined globally
+
             try {
                 const payslipFileName = `payslip_${employee.employee_id}_${year}_${String(month).padStart(2, '0')}.pdf`;
-                const payslipsDir = path.join(__dirname, 'uploads', 'payslips');
+                const payslipsDir = path.join(UPLOADS_DIR, 'payslips');
                 const fullPayslipPath = path.join(payslipsDir, payslipFileName);
 
                 if (!fs.existsSync(payslipsDir)) {
                     fs.mkdirSync(payslipsDir, { recursive: true });
                 }
 
-                const doc = new PDFDocument({
-                    size: 'A4',
-                    margins: {
-                        top: 50,
-                        bottom: 50,
-                        left: 50,
-                        right: 50
-                    }
-                });
-                doc.pipe(fs.createWriteStream(fullPayslipPath));
-
-                // --- Header Section ---
-                doc.fontSize(20).font('Helvetica-Bold').text('Beyond BIM Technologies', { align: 'center' }).moveDown(0.5);
-                doc.fontSize(10).font('Helvetica-Bold').text('SALARY BREAKUP - Annexure A', { align: 'center' }).moveDown(1);
-
-                // --- LOGO INTEGRATION ---
-                const logoPath = path.join(__dirname, 'uploads', 'company_logo', 'logo.jpeg');
-                if (fs.existsSync(logoPath)) {
-                    doc.image(logoPath, doc.page.width - 120, 50, { width: 70, height: 70 });
-                    doc.moveDown(2);
-                } else {
-                    console.warn(`Logo file not found at: ${logoPath}. Using text placeholder.`);
-                    doc.rect(doc.page.width - 100, 50, 50, 50).fillAndStroke('#cccccc', '#999999');
-                    doc.fillColor('#000000').fontSize(8).text('LOGO', doc.page.width - 90, 70);
-                    doc.moveDown(2);
-                }
-                // --- END LOGO INTEGRATION ---
-
-                doc.fontSize(12).font('Helvetica-Bold').text(`Employee Name: ${payslipData.employeeName}`, 50, doc.y);
-                doc.text(`Employee ID: ${payslipData.employeeId}`, doc.page.width - 200, doc.y, { align: 'right' }).moveDown(0.5);
-                doc.text(`Employee Designation: BIM Engineer`, 50, doc.y); // Assuming a fixed designation for now
-                doc.moveDown(1);
-
-                // --- Gross Salary per month ---
-                doc.fontSize(12).font('Helvetica-Bold').text('Gross salary per month', 50, doc.y);
-                doc.font('Helvetica').text(`${payslipData.grossEarnings.toFixed(2)}`, doc.page.width - 200, doc.y, { align: 'right' }).moveDown(1);
-
-
-                // --- Salary Components Table ---
-                const tableTop = doc.y;
-                const col1X = 50;
-                const col2X = 250; // Percentage
-                const col3X = 350; // Per month
-                const col4X = 450; // Per annum (approx)
-
-                doc.fontSize(12).font('Helvetica-Bold').text('Components in salary', col1X, tableTop);
-                doc.text('Percentage', col2X, tableTop);
-                doc.text('Per month', col3X, tableTop);
-                doc.text('Per annum', col4X, tableTop).moveDown(0.5);
-
-                doc.lineWidth(0.5).strokeColor('#cccccc').moveTo(col1X, doc.y).lineTo(doc.page.width - 50, doc.y).stroke().moveDown(0.2);
-
-                let currentY = doc.y;
-
-                const addRow = (label, percentage, perMonth, perAnnum) => {
-                    doc.fontSize(10).font('Helvetica').text(label, col1X, currentY);
-                    doc.text(percentage, col2X, currentY);
-                    doc.text(perMonth.toFixed(2), col3X, currentY);
-                    doc.text(perAnnum.toFixed(2), col4X, currentY);
-                    currentY += 20; // Line height
-                };
-
-                addRow('Basic Salary + DA', '35%', payslipData.basicSalary, payslipData.basicSalary * 12);
-                addRow('HRA', '40%', payslipData.hra, payslipData.hra * 12);
-                addRow('Conveyance allowances', '(Fixed)', payslipData.conveyanceAllowance, payslipData.conveyanceAllowance * 12);
-                addRow('Medical allowances', '(Fixed)', payslipData.medicalAllowance, payslipData.medicalAllowance * 12);
-                addRow('Special allowances', '(Fixed)', payslipData.specialAllowance, payslipData.specialAllowance * 12);
-                addRow('LTA', '(Fixed)', payslipData.lta, payslipData.lta * 12);
-                for (const key in payslipData.otherEarnings) {
-                    addRow(key, '(Fixed)', parseFloat(payslipData.otherEarnings[key]), parseFloat(payslipData.otherEarnings[key]) * 12);
-                }
-
-
-                doc.moveDown(0.5);
-                doc.fontSize(12).font('Helvetica-Bold').text('Total Gross Salary', col1X, currentY);
-                doc.text(payslipData.grossEarnings.toFixed(2), col3X, currentY);
-                doc.text((payslipData.grossEarnings * 12).toFixed(2), col4X, currentY).moveDown(1);
-
-                // --- Deductions Section ---
-                currentY = doc.y;
-                doc.fontSize(12).font('Helvetica-Bold').text('Deductions', col1X, currentY).moveDown(0.5);
-                doc.lineWidth(0.5).strokeColor('#cccccc').moveTo(col1X, doc.y).lineTo(doc.page.width - 50, doc.y).stroke().moveDown(0.2);
-
-                currentY = doc.y;
-                doc.fontSize(10).font('Helvetica').text('Provident Fund (PF)', col1X, currentY);
-                doc.text('12%', col2X, currentY);
-                doc.text(payslipData.epfEmployee.toFixed(2), col3X, currentY);
-                doc.text((payslipData.epfEmployee * 12).toFixed(2), col4X, currentY);
-                currentY += 20;
-
-                doc.fontSize(10).font('Helvetica').text('ESI contribution by employee', col1X, currentY);
-                doc.text('0.75%', col2X, currentY);
-                doc.text(payslipData.esiEmployee.toFixed(2), col3X, currentY);
-                doc.text((payslipData.esiEmployee * 12).toFixed(2), col4X, currentY);
-                currentY += 20;
-
-                doc.fontSize(10).font('Helvetica').text('Professional Tax (PT)', col1X, currentY);
-                doc.text('', col2X, currentY);
-                doc.text(payslipData.professionalTax.toFixed(2), col3X, currentY);
-                doc.text((payslipData.professionalTax * 12).toFixed(2), col4X, currentY);
-                currentY += 20;
-
-                doc.fontSize(10).font('Helvetica').text('TDS', col1X, currentY);
-                doc.text('', col2X, currentY);
-                doc.text(payslipData.tds.toFixed(2), col3X, currentY);
-                doc.text((payslipData.tds * 12).toFixed(2), col4X, currentY);
-                currentY += 20;
-
-                doc.fontSize(10).font('Helvetica').text('Loan Deduction', col1X, currentY);
-                doc.text('', col2X, currentY);
-                doc.text(payslipData.loanDeduction.toFixed(2), col3X, currentY);
-                doc.text((payslipData.loanDeduction * 12).toFixed(2), col4X, currentY);
-                currentY += 20;
-
-                // Mediclaim Deduction
-                doc.fontSize(10).font('Helvetica').text('Mediclaim Deduction', col1X, currentY);
-                doc.text('(Fixed)', col2X, currentY);
-                doc.text(payslipData.mediclaimDeduction.toFixed(2), col3X, currentY);
-                doc.text((payslipData.mediclaimDeduction * 12).toFixed(2), col4X, currentY);
-                currentY += 20;
-
-                doc.moveDown(0.5);
-                doc.fontSize(12).font('Helvetica-Bold').text('Total Deductions', col1X, currentY);
-                doc.text(payslipData.totalDeductions.toFixed(2), col3X, currentY);
-                doc.text((payslipData.totalDeductions * 12).toFixed(2), col4X, currentY).moveDown(1);
-
-                // --- Net Salary ---
-                currentY = doc.y;
-                doc.fontSize(12).font('Helvetica-Bold').text('Net Salary', col1X, currentY);
-                doc.text(payslipData.netPay.toFixed(2), col3X, currentY);
-                doc.text((payslipData.netPay * 12).toFixed(2), col4X, currentY).moveDown(1);
-
-                // --- CTC Calculation Section ---
-                currentY = doc.y;
-                doc.fontSize(12).font('Helvetica-Bold').text('CTC Calculation', col1X, currentY).moveDown(0.5);
-                doc.lineWidth(0.5).strokeColor('#cccccc').moveTo(col1X, doc.y).lineTo(doc.page.width - 50, doc.y).stroke().moveDown(0.2);
-
-                currentY = doc.y;
-                doc.fontSize(10).font('Helvetica').text('Employer PF contribution', col1X, currentY);
-                doc.text('12%', col2X, currentY);
-                doc.text(employerPFContribution.toFixed(2), col3X, currentY);
-                doc.text((employerPFContribution * 12).toFixed(2), col4X, currentY);
-                currentY += 20;
-
-                doc.fontSize(10).font('Helvetica').text('Health Insurance', col1X, currentY);
-                doc.text('(Fixed)', col2X, currentY);
-                doc.text(payslipData.healthInsuranceFixedForCTC.toFixed(2), col3X, currentY);
-                doc.text((payslipData.healthInsuranceFixedForCTC * 12).toFixed(2), col4X, currentY);
-                currentY += 20;
-
-                doc.fontSize(10).font('Helvetica').text('Employer ESI contribution', col1X, currentY);
-                doc.text('3.25%', col2X, currentY);
-                doc.text(payslipData.esiEmployer.toFixed(2), col3X, currentY); // Use the already calculated esiEmployer
-                doc.text((payslipData.esiEmployer * 12).toFixed(2), col4X, currentY); // Use the already calculated esiEmployer
-                currentY += 20;
-
-                doc.moveDown(0.5);
-                doc.fontSize(12).font('Helvetica-Bold').text('CTC: Gross salary + (Employer PF+ ESI)', col1X, currentY);
-                doc.text(ctc.toFixed(2), col3X, currentY);
-                doc.text((ctc * 12).toFixed(2), col4X, currentY).moveDown(1);
-
-
-                // --- Footer ---
-                doc.fontSize(8).font('Helvetica-Oblique').text('This is a system generated payslip, hence the signature is not required.', { align: 'center', y: doc.page.height - 50 });
-
-                doc.end();
-
+                console.log(`[PDF_DEBUG] Attempting to generate PDF for ${employee.name}. Full path: ${fullPayslipPath}`);
+                await generatePayslipPDF(payslipData, fullPayslipPath); // Call the dedicated PDF generation function
                 payslipFilePath = path.join('uploads', 'payslips', payslipFileName);
-                console.log(`[PDF_GENERATION_INFO] PDF generated at: ${fullPayslipPath}`);
+                console.log(`[PDF_DEBUG] PDF generation complete. File path prepared: ${payslipFilePath}`);
 
             } catch (pdfError) {
-                console.error(`Error generating PDF for ${employee.name} (ID: ${userId}):`, pdfError.message);
+                console.error(`[PDF_DEBUG] Error generating PDF for ${employee.name} (ID: ${userId}):`, pdfError.message, pdfError.stack);
                 payslipFilePath = null;
             }
 
 
             // 6. Insert/Update Payslip Record in the database
+            console.log(`[DB_DEBUG] Attempting to insert/update payslip record for ${employee.name} with file_path: ${payslipFilePath}`);
             await client.query(
                 `INSERT INTO payslips (
                     user_id, payroll_run_id, payslip_month, payslip_year,
                     gross_earnings, basic_salary, hra, conveyance_allowance, medical_allowance, special_allowance, lta, other_earnings,
                     total_deductions, epf_employee, epf_employer, esi_employee, esi_employer, professional_tax, tds, loan_deduction, mediclaim_deduction, other_deductions,
-                    net_pay, paid_days, unpaid_leaves, days_present, file_path
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
+                    net_pay, paid_days, unpaid_leaves, days_present, file_path,
+                    designation, joining_date
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
                 ON CONFLICT (user_id, payslip_month, payslip_year) DO UPDATE SET
                     gross_earnings = EXCLUDED.gross_earnings,
                     basic_salary = EXCLUDED.basic_salary,
@@ -4489,14 +4771,18 @@ app.post('/api/admin/payroll/run', authenticate, authorizeAdmin, async (req, res
                     unpaid_leaves = EXCLUDED.unpaid_leaves,
                     days_present = EXCLUDED.days_present,
                     file_path = COALESCE(EXCLUDED.file_path, payslips.file_path),
+                    designation = EXCLUDED.designation,
+                    joining_date = EXCLUDED.joining_date,
                     updated_at = CURRENT_TIMESTAMP
                 RETURNING *`,
                 [
                     userId, payrollRunId, month, year,
-                    grossEarnings, basicSalaryMonthly, hraMonthly, conveyanceAllowanceMonthly, medicalAllowanceMonthly, specialAllowanceMonthly, ltaMonthly, otherEarningsParsed,
-                    totalDeductions, epfEmployee, epfEmployer, esiEmployee, esiEmployer, professionalTax, tds, loanDeduction, mediclaimDeduction, otherDeductions,
-                    netPay, paidDays, unpaidLeaves, attendanceSummary.presentDays + (attendanceSummary.halfDays * 0.5 || 0),
-                    payslipFilePath
+                    grossEarnings, basicSalaryMonthly, hraMonthly, conveyanceAllowanceMonthly, medicalAllowanceMonthly, specialAllowanceMonthly, ltaMonthly, JSON.stringify(otherEarningsParsed),
+                    totalDeductions, epfEmployee, epfEmployer, esiEmployee, esiEmployer, professionalTax, tds, loanDeduction, mediclaimDeduction, JSON.stringify(otherDeductions),
+                    netPay, payableDays, attendanceSummary.unpaidLeaves, payableDays,
+                    payslipFilePath,
+                    employeeDesignation,
+                    employeeJoiningDate
                 ]
             );
         }
