@@ -4129,13 +4129,12 @@ async function generatePayslipPDF(data, outputPath) {
 
         // --- Net Pay Summary and Salary Paid By ---
         const netPayLabelX = doc.page.margins.left;
-        const netPayValueX = netPayLabelX + 120; // X position for the values
+        const netPayValueX = netPayLabelX + 100; // Adjusted X position for the value
 
         doc.y = doc.y + 10; // Add some vertical spacing
         doc.fontSize(12).font('Helvetica-Bold').text(`Net Pay:`, netPayLabelX, doc.y, { continued: true });
-        // Corrected: Ensure no extra '1' is prepended here.
-        // The `doc.text` function already handles the string, no need for manual prepending.
-        doc.text(`₹${(data.summary.netSalary || 0).toFixed(2)}`, netPayLabelX + 100, doc.y, { align: 'left', width: 150 });
+        // Corrected: Print the Net Salary value directly without any leading characters or extra formatting.
+        doc.text(`₹${(data.summary.netSalary || 0).toFixed(2)}`, netPayValueX, doc.y, { align: 'left', width: 150 });
         doc.moveDown(0.5);
 
         doc.fontSize(10).font('Helvetica').text(`Salary In Words:`, netPayLabelX, doc.y, { continued: true });
