@@ -3907,8 +3907,6 @@ function convertNumberToWords(num) {
     return result.replace(/\s+/g, ' ').trim() + ' Only';
 }
 
-// Placeholder for convertNumberToWords function if it's not defined elsewhere
-// You should replace this with your actual implementation if you have one.
 function convertNumberToWords(num) {
     const a = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
     const b = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
@@ -4129,12 +4127,14 @@ async function generatePayslipPDF(data, outputPath) {
 
         // --- Net Pay Summary and Salary Paid By ---
         const netPayLabelX = doc.page.margins.left;
-        const netPayValueX = netPayLabelX + 100; // Adjusted X position for the value
+        const netPayValueX = netPayLabelX + 100; // X position for the values
 
         doc.y = doc.y + 10; // Add some vertical spacing
-        doc.fontSize(12).font('Helvetica-Bold').text(`Net Pay:`, netPayLabelX, doc.y, { continued: true });
-        // Corrected: Print the Net Salary value directly without any leading characters or extra formatting.
-        doc.text(`₹${(data.summary.netSalary || 0).toFixed(2)}`, netPayValueX, doc.y, { align: 'left', width: 150 });
+        const netPayLineY = doc.y; // Capture the Y for this line
+
+        doc.fontSize(12).font('Helvetica-Bold').text(`Net Pay:`, netPayLabelX, netPayLineY); // Print label without continued
+        // Explicitly set the text and position for the Net Pay amount to avoid any leading characters
+        doc.text(`₹${(data.summary.netSalary || 0).toFixed(2)}`, netPayValueX, netPayLineY, { align: 'left', width: 150 });
         doc.moveDown(0.5);
 
         doc.fontSize(10).font('Helvetica').text(`Salary In Words:`, netPayLabelX, doc.y, { continued: true });
