@@ -3907,8 +3907,6 @@ function convertNumberToWords(num) {
     return result.replace(/\s+/g, ' ').trim() + ' Only';
 }
 
-// Function to generate PDF payslip using PDFKit
-// Function to generate PDF payslip using PDFKit
 // Placeholder for convertNumberToWords function if it's not defined elsewhere
 // You should replace this with your actual implementation if you have one.
 function convertNumberToWords(num) {
@@ -3962,7 +3960,7 @@ async function generatePayslipPDF(data, outputPath) {
         doc.pipe(stream);
 
         // Define the path to the logo image
-        const logoPath = path.join(__dirname, 'uploads', 'company_logo', 'logo.jpeg');
+        const logoPath = path.join(__dirname, 'uploads', 'company_logo', 'logo.png');
 
         // --- Company Info and Logo Section ---
         const companyNameX = doc.page.margins.left;
@@ -4135,6 +4133,7 @@ async function generatePayslipPDF(data, outputPath) {
 
         doc.y = doc.y + 10; // Add some vertical spacing
         doc.fontSize(12).font('Helvetica-Bold').text(`Net Pay:`, netPayLabelX, doc.y, { continued: true });
+        // Removed the extra "1" by directly printing the formatted netSalary
         doc.text(`₹${(data.summary.netSalary || 0).toFixed(2)}`, netPayLabelX + 100, doc.y, { align: 'left', width: 150 });
         doc.moveDown(0.5);
 
