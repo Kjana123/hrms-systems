@@ -3857,7 +3857,7 @@ async function calculateAttendanceSummary(userId, year, month, client, leaveAppl
 }
 
 // Helper function to convert numbers to words (Indian Rupees specific)
-// Helper function to convert numbers to words (Indian Rupees specific)
+// This is the version you confirmed was working for PDF generation.
 function convertNumberToWords(num) {
     if (typeof num !== 'number') {
         num = parseFloat(num);
@@ -3905,48 +3905,6 @@ function convertNumberToWords(num) {
     // Capitalize the first letter of each word
     result = result.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
     return result.replace(/\s+/g, ' ').trim() + ' Only';
-}
-
-function convertNumberToWords(num) {
-    const a = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
-    const b = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
-
-    const numToWordsFull = (n) => {
-        if ((n = n.toString()).length > 9) return 'overflow';
-        const n_string = ('000000000' + n).substr(-9).match(/^(\d{2})(\d{2})(\d{2})(\d{1})(\d{2})$/);
-        if (!n_string) return '';
-
-        let str = '';
-        str += (Number(n_string[1]) != 0) ? (a[Number(n_string[1])] || b[n_string[1][0]] + ' ' + a[n_string[1][1]]) + ' crore ' : '';
-        str += (Number(n_string[2]) != 0) ? (a[Number(n_string[2])] || b[n_string[2][0]] + ' ' + a[n_string[2][1]]) + ' lakh ' : '';
-        str += (Number(n_string[3]) != 0) ? (a[Number(n_string[3])] || b[n_string[3][0]] + ' ' + a[n_string[3][1]]) + ' thousand ' : '';
-        str += (Number(n_string[4]) != 0) ? (a[Number(n_string[4])] || b[n_string[4][0]] + ' ' + a[n_string[4][1]]) + ' hundred ' : '';
-        str += (Number(n_string[5]) != 0) ? ((str != '') ? 'and ' : '') + (a[Number(n_string[5])] || b[n_string[5][0]] + ' ' + a[n_string[5][1]]) + '' : '';
-        return str.trim();
-    };
-
-    // Handle decimal part
-    const [integerPart, decimalPart] = num.toFixed(2).split('.');
-    let wordsFullInteger = numToWordsFull(integerPart);
-    let finalWords = '';
-
-    // Capitalize the first letter of each word in the integer part
-    if (wordsFullInteger) {
-        finalWords = wordsFullInteger.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ');
-    }
-
-    if (decimalPart && parseFloat(decimalPart) > 0) {
-        let paiseWordsFull = numToWordsFull(decimalPart);
-        let paiseCapitalized = '';
-        if (paiseWordsFull) {
-            paiseCapitalized = paiseWordsFull.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ');
-        }
-        finalWords += ` And ${paiseCapitalized} Paise`; // Full words for paise
-    }
-    
-    finalWords += ' Only'; // Add "Only" as a separate word, capitalized
-
-    return finalWords.trim();
 }
 
 
@@ -4044,11 +4002,13 @@ async function generatePayslipPDF(data, outputPath) {
 
         // Table Headers (Earnings)
         doc.fontSize(10).font('Helvetica-Bold').text('Description', tableLeftX, currentTableY, { width: descriptionColWidth });
-        doc.text('Amount (₹)', tableLeftX + descriptionColWidth, currentTableY, { align: 'right', width: amountColWidth }); 
+        // Corrected: Use "Amount (Rs.)"
+        doc.text('Amount (Rs.)', tableLeftX + descriptionColWidth, currentTableY, { align: 'right', width: amountColWidth }); 
 
         // Table Headers (Deductions)
-        doc.text('Description', tableRightX, currentTableY, { width: descriptionColWidth });
-        doc.text('Amount (₹)', tableRightX + descriptionColWidth, currentTableY, { align: 'right', width: amountColWidth }); 
+        doc.fontSize(10).font('Helvetica-Bold').text('Description', tableRightX, currentTableY, { width: descriptionColWidth });
+        // Corrected: Use "Amount (Rs.)"
+        doc.text('Amount (Rs.)', tableRightX + descriptionColWidth, currentTableY, { align: 'right', width: amountColWidth }); 
         currentTableY += tableRowHeight;
 
         // Draw line below headers for both tables
@@ -4058,7 +4018,7 @@ async function generatePayslipPDF(data, outputPath) {
 
         doc.font('Helvetica'); // Reset font for table content
 
-        // Prepare data for iteration
+        // Prepare data for iteration - THIS WAS THE MISSING PART
         const earningsRows = [
             { desc: 'Basic + DA', val: (data.earnings.basicDA || 0).toFixed(2) },
             { desc: 'House Rent Allowances', val: (data.earnings.houseRentAllowances || 0).toFixed(2) },
@@ -4134,7 +4094,7 @@ async function generatePayslipPDF(data, outputPath) {
 
         doc.fontSize(12).font('Helvetica-Bold').text(`Net Pay:`, netPayLabelX, netPayLineY); // Print label without continued
         // Explicitly set the text and position for the Net Pay amount to avoid any leading characters
-        doc.text(`₹${(data.summary.netSalary || 0).toFixed(2)}`, netPayValueX, netPayLineY, { align: 'left', width: 150 });
+        doc.text(`Rs. ${(data.summary.netSalary || 0).toFixed(2)}`, netPayValueX, netPayLineY, { align: 'left', width: 150 });
         doc.moveDown(0.5);
 
         doc.fontSize(10).font('Helvetica').text(`Salary In Words:`, netPayLabelX, doc.y, { continued: true });
