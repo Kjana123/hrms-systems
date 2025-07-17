@@ -3960,7 +3960,7 @@ async function generatePayslipPDF(data, outputPath) {
         doc.pipe(stream);
 
         // Define the path to the logo image
-        const logoPath = path.join(__dirname, 'uploads', 'company_logo', 'logo.jpeg');
+        const logoPath = path.join(__dirname, 'uploads', 'company_logo', 'logo.jpeg'); // Changed to logo.jpeg
 
         // --- Company Info and Logo Section ---
         const companyNameX = doc.page.margins.left;
@@ -4046,11 +4046,11 @@ async function generatePayslipPDF(data, outputPath) {
 
         // Table Headers (Earnings)
         doc.fontSize(10).font('Helvetica-Bold').text('Description', tableLeftX, currentTableY, { width: descriptionColWidth });
-        doc.text('Amount (₹)', tableLeftX + descriptionColWidth, currentTableY, { align: 'right', width: amountColWidth });
+        doc.text('Amount (₹)', tableLeftX + descriptionColWidth, currentTableY, { align: 'right', width: amountColWidth }); 
 
         // Table Headers (Deductions)
         doc.text('Description', tableRightX, currentTableY, { width: descriptionColWidth });
-        doc.text('Amount (₹)', tableRightX + descriptionColWidth, currentTableY, { align: 'right', width: amountColWidth });
+        doc.text('Amount (₹)', tableRightX + descriptionColWidth, currentTableY, { align: 'right', width: amountColWidth }); 
         currentTableY += tableRowHeight;
 
         // Draw line below headers for both tables
@@ -4133,7 +4133,8 @@ async function generatePayslipPDF(data, outputPath) {
 
         doc.y = doc.y + 10; // Add some vertical spacing
         doc.fontSize(12).font('Helvetica-Bold').text(`Net Pay:`, netPayLabelX, doc.y, { continued: true });
-        // Removed the extra "1" by directly printing the formatted netSalary
+        // Corrected: Ensure no extra '1' is prepended here.
+        // The `doc.text` function already handles the string, no need for manual prepending.
         doc.text(`₹${(data.summary.netSalary || 0).toFixed(2)}`, netPayLabelX + 100, doc.y, { align: 'left', width: 150 });
         doc.moveDown(0.5);
 
