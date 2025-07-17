@@ -64,7 +64,7 @@ const AuthForms = ({ handleLogin, darkMode, toggleDarkMode, showMessage, apiBase
                     Welcome Back!
                 </h2>
                 <p className="text-center text-gray-600 dark:text-gray-300 mb-8 text-lg">
-                    Sign in to access your HRMS dashboard.
+                    Sign-in to access your HRMS Dashboard.
                 </p>
 
                 <form onSubmit={onLoginSubmit} className="space-y-6">
