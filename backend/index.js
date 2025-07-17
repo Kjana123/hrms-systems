@@ -3960,27 +3960,38 @@ async function generatePayslipPDF(data, outputPath) {
         const headerColWidth = (doc.page.width / 2) - doc.page.margins.left - 30;
         const headerRowHeight = 18;
 
+        // Define fixed widths for labels and calculated start positions for values
+        const leftLabelWidth = 80; // Max width for labels in the left column (e.g., "Employee ID:")
+        const rightLabelWidth = 95; // Max width for labels in the right column (e.g., "Employee Name:")
+        const valuePadding = 5; // Small padding between label and value
+
+        const leftValueX = headerLeftColX + leftLabelWidth + valuePadding;
+        const rightValueX = headerRightColX + rightLabelWidth + valuePadding;
+
         // Row 1
-        doc.text(`Employee ID:`, headerLeftColX, currentY, { continued: true, width: headerColWidth });
-        doc.font('Helvetica-Bold').text(`${data.headerDetails.employeeId}`, headerLeftColX + 70, currentY, { width: headerColWidth });
-        doc.font('Helvetica').text(`Employee Name:`, headerRightColX, currentY, { continued: true, width: headerColWidth });
-        doc.font('Helvetica-Bold').text(`${data.headerDetails.employeeName}`, headerRightColX + 85, currentY, { width: headerColWidth });
+        doc.text(`Employee ID:`, headerLeftColX, currentY, { width: leftLabelWidth, align: 'left' });
+        doc.font('Helvetica-Bold').text(`${data.headerDetails.employeeId}`, leftValueX, currentY, { width: headerColWidth - leftLabelWidth - valuePadding, align: 'left' });
+        
+        doc.font('Helvetica').text(`Employee Name:`, headerRightColX, currentY, { width: rightLabelWidth, align: 'left' });
+        doc.font('Helvetica-Bold').text(`${data.headerDetails.employeeName}`, rightValueX, currentY, { width: headerColWidth - rightLabelWidth - valuePadding, align: 'left' });
         currentY += headerRowHeight;
         doc.y = currentY;
 
         // Row 2
-        doc.font('Helvetica').text(`Designation:`, headerLeftColX, currentY, { continued: true, width: headerColWidth });
-        doc.font('Helvetica-Bold').text(`${data.headerDetails.designation}`, headerLeftColX + 70, currentY, { width: headerColWidth });
-        doc.font('Helvetica').text(`Month/Year:`, headerRightColX, currentY, { continued: true, width: headerColWidth });
-        doc.font('Helvetica-Bold').text(`${data.headerDetails.monthYear}`, headerRightColX + 85, currentY, { width: headerColWidth });
+        doc.font('Helvetica').text(`Designation:`, headerLeftColX, currentY, { width: leftLabelWidth, align: 'left' });
+        doc.font('Helvetica-Bold').text(`${data.headerDetails.designation}`, leftValueX, currentY, { width: headerColWidth - leftLabelWidth - valuePadding, align: 'left' });
+        
+        doc.font('Helvetica').text(`Month/Year:`, headerRightColX, currentY, { width: rightLabelWidth, align: 'left' });
+        doc.font('Helvetica-Bold').text(`${data.headerDetails.monthYear}`, rightValueX, currentY, { width: headerColWidth - rightLabelWidth - valuePadding, align: 'left' });
         currentY += headerRowHeight;
         doc.y = currentY;
 
         // Row 3
-        doc.font('Helvetica').text(`Joining Date:`, headerLeftColX, currentY, { continued: true, width: headerColWidth });
-        doc.font('Helvetica-Bold').text(`${data.headerDetails.joiningDate}`, headerLeftColX + 70, currentY, { width: headerColWidth });
-        doc.font('Helvetica').text(`Payable Days:`, headerRightColX, currentY, { continued: true, width: headerColWidth });
-        doc.font('Helvetica-Bold').text(`${data.headerDetails.payableDays}`, headerRightColX + 85, currentY, { width: headerColWidth });
+        doc.font('Helvetica').text(`Joining Date:`, headerLeftColX, currentY, { width: leftLabelWidth, align: 'left' });
+        doc.font('Helvetica-Bold').text(`${data.headerDetails.joiningDate}`, leftValueX, currentY, { width: headerColWidth - leftLabelWidth - valuePadding, align: 'left' });
+        
+        doc.font('Helvetica').text(`Payable Days:`, headerRightColX, currentY, { width: rightLabelWidth, align: 'left' });
+        doc.font('Helvetica-Bold').text(`${data.headerDetails.payableDays}`, rightValueX, currentY, { width: headerColWidth - rightLabelWidth - valuePadding, align: 'left' });
         currentY += headerRowHeight;
         doc.y = currentY + 25;
 
@@ -4018,7 +4029,7 @@ async function generatePayslipPDF(data, outputPath) {
 
         doc.font('Helvetica'); // Reset font for table content
 
-        // Prepare data for iteration - THIS WAS THE MISSING PART
+        // Prepare data for iteration
         const earningsRows = [
             { desc: 'Basic + DA', val: (data.earnings.basicDA || 0).toFixed(2) },
             { desc: 'House Rent Allowances', val: (data.earnings.houseRentAllowances || 0).toFixed(2) },
@@ -4092,8 +4103,8 @@ async function generatePayslipPDF(data, outputPath) {
         doc.y = doc.y + 10; // Add some vertical spacing
         const netPayLineY = doc.y; // Capture the Y for this line
 
-        doc.fontSize(12).font('Helvetica-Bold').text(`Net Pay:`, netPayLabelX, netPayLineY); // Print label without continued
-        // Explicitly set the text and position for the Net Pay amount to avoid any leading characters
+        doc.fontSize(12).font('Helvetica-Bold').text(`Net Pay:`, netPayLabelX, netPayLineY); // Print label
+        // Corrected: Print "Rs." prefix and then the amount.
         doc.text(`Rs. ${(data.summary.netSalary || 0).toFixed(2)}`, netPayValueX, netPayLineY, { align: 'left', width: 150 });
         doc.moveDown(0.5);
 
