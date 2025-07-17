@@ -3960,7 +3960,7 @@ async function generatePayslipPDF(data, outputPath) {
         doc.pipe(stream);
 
         // Define the path to the logo image
-        const logoPath = path.join(__dirname, 'uploads', 'company_logo', 'logo.png');
+        const logoPath = path.join(__dirname, 'uploads', 'company_logo', 'logo.jpeg');
 
         // --- Company Info and Logo Section ---
         const companyNameX = doc.page.margins.left;
