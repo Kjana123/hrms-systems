@@ -27,11 +27,11 @@ const AuthForms = ({ handleLogin, darkMode, toggleDarkMode, showMessage, apiBase
             style={{ backgroundImage: `url('/assets/images/beyond-bim-5.png')` }} // Direct inline style for background image
         >
             {/* Company Logo (Top-Left Corner) - Positioned as FIXED */}
-            <img
+            {/* <img
                 src="/assets/images/company-logo.jpeg" // Placeholder for Company Logo
                 alt="Company Logo"
                 className="fixed top-4 left-4 w-24 h-auto rounded-md shadow-lg z-50" // Changed to 'fixed', added z-index
-            />
+            /> */}
 
             <div className={`bg-white dark:bg-gray-800 p-8 sm:p-10 rounded-xl shadow-2xl w-full max-w-md transition-all duration-500 transform ${darkMode ? 'text-white' : 'text-gray-800'} hover:scale-[1.01]`}>
                 <div className="flex justify-end mb-4">
@@ -126,11 +126,11 @@ const AuthForms = ({ handleLogin, darkMode, toggleDarkMode, showMessage, apiBase
             </div>
 
             {/* Developer Logo (Bottom-Right Corner) - Positioned as FIXED */}
-            <img
+            {/* <img
                 src="/assets/images/united-solutions-plus.jpeg" // Placeholder for Developer Logo
                 alt="Developer Logo"
                 className="fixed bottom-4 right-4 w-20 h-auto rounded-md shadow-lg z-50" // Changed to 'fixed', added z-index
-            />
+            /> */}
 
             {/* Forgot Password Modal */}
             {showForgotPasswordModal && (
