@@ -57,7 +57,7 @@ const AuthForms = ({ handleLogin, darkMode, toggleDarkMode, showMessage, apiBase
                 <h2 className="text-2xl sm:text-3xl font-extrabold text-center mb-2
                     bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-purple-700 // ADDED GRADIENT
                     ">
-                    Beyond BIM Technologies
+                    Welcome to United Solutions Plus
                 </h2>
 
                 <h2 className="text-4xl font-extrabold text-center mb-8 text-blue-600 dark:text-blue-400">

@@ -252,10 +252,11 @@ const AdminDashboard = ({ user, handleLogout, darkMode, toggleDarkMode, showMess
 
         try {
             if (isEditingEmployee && editingEmployeeData) {
-                await authAxios.put(`${apiBaseUrl}api/admin/users/${editingEmployeeData.id}`, employeeData);
+                // NEW
+await authAxios.put(`/api/admin/users/${editingEmployeeData.id}`, employeeData);
                 showMessage('Employee updated successfully!', 'success');
             } else {
-                await authAxios.post(`${apiBaseUrl}/admin/register-employee`, employeeData);
+                await authAxios.post('/api/admin/register-employee', employeeData);
                 showMessage('Employee added successfully!', 'success');
             }
             // Clear form and re-fetch data
@@ -314,7 +315,7 @@ const AdminDashboard = ({ user, handleLogout, darkMode, toggleDarkMode, showMess
     const deleteEmployee = async (employeeIdToDelete) => {
         if (window.confirm('Are you sure you want to delete this employee and all their associated data?')) {
             try {
-                await authAxios.delete(`${apiBaseUrl}/admin/users/${employeeIdToDelete}`);
+                await authAxios.delete(`/api/admin/users/${employeeIdToDelete}`);
                 showMessage('Employee and all associated data deleted successfully!', 'success');
                 // Re-fetch employees
                 const employeesResponse = await authAxios.get('/api/admin/users');

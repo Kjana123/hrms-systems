@@ -15,7 +15,7 @@ const App = () => {
   const [loadingApp, setLoadingApp] = React.useState(true); // New loading state for the App component
 
   // Base URL for your backend API
-  const API_BASE_URL = 'https://hrms-backend-rhsc.onrender.com'; // Adjust if your backend runs on a different port/domain
+  const API_BASE_URL = 'http://localhost:3001';  // Adjust if your backend runs on a different port/domain
 
   // --- START OF NECESSARY CHANGES ---
 
@@ -132,29 +132,32 @@ const App = () => {
 
   // Function to handle user login
   const handleLogin = React.useCallback(async (email, password) => { // Correctly accepts email, password
-    setLoadingApp(true); // Set loading while logging in
-    try {
-      const response = await axios.post(`${API_BASE_URL}/auth/login`, { email, password }, { // Sends as object
-        withCredentials: true,
-      });
-      const { accessToken: receivedAccessToken } = response.data;
-      setAccessToken(receivedAccessToken);
-      localStorage.setItem('accessToken', receivedAccessToken);
-      await fetchUserProfile(receivedAccessToken); // Fetch full user profile after successful login
-      showMessage('Login successful!', 'success');
-    } catch (error) {
-      console.error("Login error:", error.response?.data?.message || error.message);
-      showMessage(error.response?.data?.message || 'Login failed. Please try again.', 'error');
-      setAccessToken(null);
-      setIsAuthenticated(false);
-      setAuthHeader(null);
-      localStorage.removeItem('accessToken');
-      localStorage.removeItem('refreshToken'); // Ensure refresh token is cleared on login failure
-    } finally {
-      setLoadingApp(false);
-    }
-  }, [fetchUserProfile, showMessage, setAuthHeader]);
-
+    setLoadingApp(true); // Set loading while logging in
+    try {
+      const response = await axios.post(`${API_BASE_URL}/auth/login`, { email, password }, { // Sends as object
+        withCredentials: true,
+      });
+      // FIX: Only destructure the accessToken, as the refresh token is coming via cookie
+      const { accessToken: receivedAccessToken } = response.data; 
+      
+      setAccessToken(receivedAccessToken);
+      localStorage.setItem('accessToken', receivedAccessToken);
+      // The refresh token is now ONLY handled via the HTTP-only cookie.
+      
+      await fetchUserProfile(receivedAccessToken); // Fetch full user profile after successful login
+      showMessage('Login successful!', 'success');
+    } catch (error) {
+      console.error("Login error:", error.response?.data?.message || error.message);
+      showMessage(error.response?.data?.message || 'Login failed. Please try again.', 'error');
+      setAccessToken(null);
+      setIsAuthenticated(false);
+      setAuthHeader(null);
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken'); // Ensure refresh token is cleared on login failure
+    } finally {
+      setLoadingApp(false);
+    }
+  }, [fetchUserProfile, showMessage, setAuthHeader]);
   // --- END OF NECESSARY CHANGES ---
 
 
