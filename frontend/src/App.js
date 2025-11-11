@@ -15,7 +15,8 @@ const App = () => {
   const [loadingApp, setLoadingApp] = React.useState(true); // New loading state for the App component
 
   // Base URL for your backend API
-  const API_BASE_URL = 'http://localhost:3001';  // Adjust if your backend runs on a different port/domain
+ const isProduction = window.location.hostname !== 'localhost';
+const API_BASE_URL = isProduction ? 'https://hrms-backend-rhsc.onrender.com' : 'http://localhost:3001';
 
   // --- START OF NECESSARY CHANGES ---
 

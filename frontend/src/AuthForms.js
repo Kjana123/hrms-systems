@@ -28,7 +28,7 @@ const AuthForms = ({ handleLogin, darkMode, toggleDarkMode, showMessage, apiBase
         >
             {/* Company Logo (Top-Left Corner) - Positioned as FIXED */}
             {/* <img
-                src="/assets/images/company-logo.jpeg" // Placeholder for Company Logo
+                src="/assets/images/company-logo.jpeg" // Placeholder for Company 
                 alt="Company Logo"
                 className="fixed top-4 left-4 w-24 h-auto rounded-md shadow-lg z-50" // Changed to 'fixed', added z-index
             /> */}
